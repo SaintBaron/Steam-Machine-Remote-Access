@@ -1,0 +1,59 @@
+# Steam Machine Remote Access: client settings (example with every option).
+#
+# steam-remote-setup writes this file for you. Its location:
+#   Linux:   ~/.config/steam-remote/config
+#   Windows: %APPDATA%\steam-remote\config
+#
+# Format: plain KEY="value" lines. They're read, never run, so only plain text in
+# quotes works. Lines starting with # are comments.
+
+# REQUIRED. The Steam Machine's fixed IP (a DHCP reservation in your router).
+MACHINE_IP="192.168.0.50"
+
+# Remote access from outside your home, through a VPN (docs/remote-access.md).
+# Set these with "steam-remote-setup remote" rather than by hand, because the
+# Steam Machine has to be told about REMOTE_PC_IP too.
+# REMOTE_MODE: off (home network only), router, tailscale or other.
+REMOTE_MODE="off"
+# This PC's address on the VPN.
+REMOTE_PC_IP=""
+# The Steam Machine's address on the VPN, if it has its own (Tailscale: 100.x.x.x).
+# Tried when MACHINE_IP doesn't answer.
+REMOTE_MACHINE_IP=""
+
+# The account on the Steam Machine. SteamOS uses "deck".
+MACHINE_USER="deck"
+
+# The name for it in your SSH config, so "ssh steam-machine" works.
+HOST_ALIAS="steam-machine"
+
+# The SSH key used for it. Linux: ~/.ssh/...   Windows: ~/.ssh/... (in your user folder)
+KEY_FILE="~/.ssh/steam-machine_ed25519"
+
+# Wake-on-LAN. The MAC is learned automatically on every successful connection;
+# set it only to override (format aa:bb:cc:dd:ee:ff).
+MACHINE_MAC=""
+# Where the wake packet is sent. Empty = the .255 address of a /24 network
+# (192.168.0.50 -> 192.168.0.255). Set it if your network isn't a /24.
+BROADCAST=""
+# Seconds to wait for the Steam Machine to wake up.
+WAKE_TIMEOUT="90"
+
+# The Sunshine app Moonlight opens. "Desktop" streams the whole screen.
+MOONLIGHT_APP="Desktop"
+# This PC's name in Sunshine's paired-devices list. Empty = the computer's name.
+CLIENT_NAME=""
+# Local port for Sunshine's web UI through the SSH tunnel: https://localhost:47990
+# Change it only if something else on this PC already uses 47990.
+WEBUI_PORT="47990"
+
+# Linux only. The shared login closes itself after this long unused (a safety net
+# if steam-connect is killed). ssh time format: 30m, 2h...
+PERSIST="2h"
+# Linux only. While steam-connect is open, it uses the login every this-many seconds
+# so the login doesn't time out, and to notice if the connection dropped.
+KEEPALIVE="600"
+
+# Work around Sunshine's Game Mode black-screen bug (Sunshine 2026.906 and later,
+# LizardByte/Sunshine issue #5839). "yes" or "no". Turn it off once a fixed Sunshine ships.
+BLACK_SCREEN_FIX="yes"

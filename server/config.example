@@ -1,0 +1,37 @@
+# Steam Machine Remote Access: Steam Machine settings (example with every option).
+#
+# Lives at /home/.steam-remote/config on the Steam Machine (root-owned).
+# The setup writes it for you. After editing it, apply with:
+#   sudo /home/.steam-remote/steam-remote-server.sh
+# Values are read, not run, so only plain text in quotes works.
+
+# The Steam Machine account you log in as.
+USER_NAME="deck"
+
+# The PCs allowed to connect, separated by spaces. Each needs a fixed IP.
+ALLOWED_IPS="192.168.0.20 192.168.0.21"
+
+# Remote access from outside your home, through a VPN (docs/remote-access.md).
+# Each PC's address on the VPN, separated by spaces. Empty = home network only.
+# Allowed: private addresses (or private ranges of /24 or smaller) and single
+# Tailscale-style addresses (100.64.x.x-100.127.x.x). Public addresses are refused.
+REMOTE_IPS=""
+
+# Display outputs. List them with:  /home/.steam-remote/steam-remote-server.sh --outputs
+# Names look like card0-HDMI-A-1 or card1-DP-2.
+# STREAM_OUTPUT: what Sunshine streams from, usually a dummy plug (EDID emulator).
+#                Empty = stream whatever screen is on.
+# TV_OUTPUT:     your TV/monitor. Turned off while streaming, back on afterwards.
+#                Empty = no TV.
+# Switching only happens when both are set.
+STREAM_OUTPUT="card0-HDMI-A-1"
+TV_OUTPUT="card0-DP-1"
+
+# Stop Sunshine after this many minutes with nobody streaming (0 = never).
+IDLE_MINUTES="60"
+
+# The name Moonlight shows for this machine.
+SUNSHINE_NAME="steam-machine"
+
+# Keep Wake-on-LAN (magic packet only) on for wired connections. yes or no.
+WAKE_ON_LAN="yes"

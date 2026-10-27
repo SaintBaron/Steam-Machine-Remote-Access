@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# steam-ssh: open a terminal on the Steam Machine (no Sunshine, no stream).
+# https://github.com/SaintBaron/Steam-Machine-Remote-Access
+#
+# Wakes the Steam Machine if needed. If steam-connect is running, its login is
+# reused, so there's no password prompt.
+#
+# Usage:
+#   steam-ssh                  interactive shell
+#   steam-ssh <command...>     run one command, e.g.  steam-ssh systemctl is-active steam-remote-sunshine.service
+
+set -u
+LIB="${STEAM_REMOTE_SHARE:-$HOME/.local/share/steam-remote}/lib.sh"
+# shellcheck source=lib.sh source-path=SCRIPTDIR
+. "$LIB" 2>/dev/null || { echo "Can't find $LIB. Run the installer again." >&2; exit 1; }
+
+case "${1:-}" in
+  --version) echo "steam-ssh $SR_VERSION"; exit 0 ;;
+  -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+load_config
+ensure_awake quiet
+learn_mac
+
+if logged_in; then
+  ssh -S "$CTL" -o ControlMaster=no -t "$HOST_ALIAS" "$@"
+else
+  ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "$@"
+fi
+rc=$?
+if [ "$rc" -eq 255 ]; then
+  printf '\033[1;31mError:\033[0m Couldn'"'"'t connect to the Steam Machine. See docs/troubleshooting.md.\n' >&2
+  [ -n "${STEAM_REMOTE_PAUSE:-}" ] && read -rp 'Press Enter to close this window'
+fi
+exit "$rc"

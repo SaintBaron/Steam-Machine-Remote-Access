@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+# steam-connect: stream the Steam Machine to this PC.
+# https://github.com/SaintBaron/Steam-Machine-Remote-Access
+#
+# Wakes the Steam Machine if needed, logs in once (key + password), checks the
+# setup survived any SteamOS update, switches the picture to the stream output,
+# starts Sunshine, opens the web UI tunnel and starts Moonlight. It then stays
+# open. Press Q, press Ctrl+C or close the window to disconnect: Moonlight
+# closes, Sunshine stops, the picture goes back to the TV and the login closes.
+#
+# Usage:
+#   steam-connect                    connect and stream
+#   steam-connect restart            restart Sunshine first (e.g. it couldn't see a screen)
+#   steam-connect nostream           connect without opening Moonlight (for pairing)
+#   steam-connect disconnect         clean up after a crash: close everything to the Steam Machine
+#   steam-connect --version
+
+set -u
+LIB="${STEAM_REMOTE_SHARE:-$HOME/.local/share/steam-remote}/lib.sh"
+# shellcheck source=lib.sh source-path=SCRIPTDIR
+. "$LIB" 2>/dev/null || { echo "Can't find $LIB. Run the installer again." >&2; exit 1; }
+
+RESTART=0
+STREAM=1
+MODE=connect
+for arg in "$@"; do
+  case "$arg" in
+    restart)    RESTART=1 ;;
+    nostream)   STREAM=0 ;;
+    disconnect) MODE=disconnect ;;
+    disconnect-after-hangup) MODE=hangup ;;   # used internally when the window is closed
+    --version)  echo "steam-connect $SR_VERSION"; exit 0 ;;
+    -h|--help)  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "Unknown option '$arg'. Try: steam-connect --help" ;;
+  esac
+done
+
+load_config
+LOCK="${XDG_RUNTIME_DIR:-$HOME/.cache}/steam-connect.lock"
+HANGUP_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/steam-remote/disconnect.log"
+SELF=$(readlink -f "$0")
+XPROP_FIX="DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE"
+
+# ---------------------------------------------------------------------------
+# Disconnect. "full" (steam-connect disconnect) also closes the login forcefully and
+# kills any other SSH process to the Steam Machine; the normal one leaves separately
+# opened steam-ssh shells alone.
+# ---------------------------------------------------------------------------
+disconnect() {
+  local full=${1:-}
+  say "Disconnecting"
+  moonlight_kill
+
+  if logged_in; then
+    [ -n "$TV_ON" ] || load_outputs
+    say "Stopping Sunshine${TV_ON:+ and switching back to the TV}"
+    run "$XPROP_FIX 0 >/dev/null 2>&1; sudo -n systemctl stop $SR_SUN_UNIT; ${TV_ON:-true}" \
+      || warn "Couldn't stop Sunshine${TV_ON:+ or switch back to the TV}. Run: ssh -t $HOST_ALIAS sudo $SR_SERVER"
+  elif [ "$full" = full ] && [ -t 0 ] && find_target; then
+    say "No open login, so logging in once to stop Sunshine"
+    # shellcheck disable=SC2029  # built here on purpose; runs on the Steam Machine
+    ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "$XPROP_FIX 0 >/dev/null 2>&1; sudo -n systemctl stop $SR_SUN_UNIT; sudo $SR_SERVER --boot-display; true" \
+      || warn "Couldn't stop Sunshine."
+  else
+    warn "The login had already closed. If Sunshine is still running, the Steam Machine's idle timer stops it and switches back to the TV."
+  fi
+
+  if [ "$full" = full ]; then
+    ssh -S "$CTL" -O exit "$HOST_ALIAS" >/dev/null 2>&1
+    rm -f "$CTL"
+    local pids
+    pids=$(pgrep -a -x ssh | grep -F -e "$HOST_ALIAS" -e "$MACHINE_IP" -e "${REMOTE_MACHINE_IP:-$MACHINE_IP}" | cut -d' ' -f1 | xargs)
+    if [ -n "$pids" ]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null; sleep 1
+      # shellcheck disable=SC2086
+      kill -9 $pids 2>/dev/null
+      say "Closed leftover SSH processes: $pids"
+    fi
+  else
+    # Close the web UI tunnel, then let the login end once nothing else uses it.
+    ssh -S "$CTL" -O cancel -L "127.0.0.1:$WEBUI_PORT:127.0.0.1:47990" "$HOST_ALIAS" >/dev/null 2>&1
+    ssh -S "$CTL" -O stop "$HOST_ALIAS" >/dev/null 2>&1
+  fi
+  say "Disconnected."
+}
+
+if [ "$MODE" = disconnect ]; then disconnect full; exit 0; fi
+if [ "$MODE" = hangup ]; then disconnect; exit 0; fi
+
+# ---------------------------------------------------------------------------
+# Exit handling: disconnect once, whatever ends the script after login.
+# ---------------------------------------------------------------------------
+SR_ARMED=0
+# shellcheck disable=SC2317  # runs from a trap
+on_exit() {
+  local rc=$?
+  [ "$SR_ARMED" = 1 ] || return 0
+  SR_ARMED=0
+  echo
+  disconnect
+  # Launched from the app menu: let the messages be read before the window closes.
+  if [ -n "${STEAM_REMOTE_PAUSE:-}" ] && [ -t 0 ]; then
+    if [ "$rc" -ne 0 ] && [ "$rc" -lt 129 ]; then read -r -p 'Press Enter to close this window' _; else sleep 2; fi
+  fi
+  return 0
+}
+# Window closed: the terminal may kill everything left in it, so a detached copy
+# of this script does the disconnect and logs its output.
+# shellcheck disable=SC2317  # runs from a trap
+on_hangup() {
+  if [ "$SR_ARMED" = 1 ]; then
+    SR_ARMED=0
+    mkdir -p "$(dirname "$HANGUP_LOG")"
+    (umask 077; echo "--- $(date '+%F %T') window closed" >>"$HANGUP_LOG")
+    setsid "$SELF" disconnect-after-hangup </dev/null >>"$HANGUP_LOG" 2>&1 9>&- &
+  fi
+  exit 129
+}
+trap on_exit EXIT
+trap on_hangup HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Only one steam-connect at a time, so closing a second window can't cut off the first.
+mkdir -p "$(dirname "$LOCK")"
+exec 9>"$LOCK"
+flock -n 9 || die "steam-connect is already running in another window. Use that one, or close it first."
+
+command -v python3 >/dev/null 2>&1 || warn "python3 isn't installed, so Wake-on-LAN won't work."
+MOONLIGHT=$(moonlight_cmd)
+[ "$STREAM" = 0 ] || [ -n "$MOONLIGHT" ] || die "Moonlight isn't installed. See the guide, or use: steam-connect nostream"
+
+# 1. Awake? (wakes it with Wake-on-LAN if not)
+ensure_awake verbose
+learn_mac
+
+# 2. One login, shared by everything below, the web UI tunnel and steam-ssh.
+if logged_in; then
+  say "Already logged in"
+else
+  rm -f "$CTL"
+  say "Logging in: your key passphrase, then the Steam Machine's password"
+  ssh -M -S "$CTL" -o HostName="$TARGET" -o ControlPersist="$PERSIST" -o ExitOnForwardFailure=yes \
+      -L "127.0.0.1:$WEBUI_PORT:127.0.0.1:47990" -fN "$HOST_ALIAS" 9>&- \
+    || die "Login failed. If it mentions port $WEBUI_PORT, run: steam-connect disconnect"
+fi
+SR_ARMED=1   # from here on, anything that ends the script also disconnects
+
+# 3. Did a SteamOS update remove part of the setup? (The boot service normally
+#    repairs it; this catches the case where the update removed that too.)
+if ! run "$SR_SERVER --check" >/dev/null 2>&1; then
+  if ! run "test -x $SR_SERVER"; then
+    die "The Steam Machine isn't set up yet (no $SR_SERVER). Run: steam-remote-setup"
+  fi
+  warn "Part of the Steam Machine setup is missing (usually after a SteamOS update):"
+  run "$SR_SERVER --check" 2>&1 | sed 's/^/    /'
+  say "Repairing it: enter the Steam Machine's password if asked"
+  ssh -t -S "$CTL" "$HOST_ALIAS" sudo "$SR_SERVER" \
+    || die "The repair failed. Check its output, or run: ssh -t $HOST_ALIAS sudo $SR_SERVER"
+fi
+
+# 4. Switch the picture to the stream output (the TV goes dark), if both are configured.
+load_outputs
+if [ -n "$DUMMY_ON" ]; then
+  say "Switching to the stream output"
+  run "$DUMMY_ON" || warn "Couldn't switch displays. Run: ssh -t $HOST_ALIAS sudo $SR_SERVER"
+  sleep 2
+fi
+
+# 5. Start (or restart) Sunshine.
+if [ "$RESTART" = 1 ]; then
+  say "Restarting Sunshine"
+  run sudo -n systemctl restart "$SR_SUN_UNIT" || die "Couldn't restart Sunshine (sudo rule missing?). Run: ssh -t $HOST_ALIAS sudo $SR_SERVER"
+elif [ "$(run systemctl is-active "$SR_SUN_UNIT")" != active ]; then
+  say "Starting Sunshine"
+  run sudo -n systemctl start "$SR_SUN_UNIT" || die "Couldn't start Sunshine (sudo rule missing?). Run: ssh -t $HOST_ALIAS sudo $SR_SERVER"
+else
+  say "Sunshine is already running"
+fi
+
+# 6. Wait until Sunshine answers.
+say "Waiting for Sunshine"
+if ! wait_port 47989 30; then
+  warn "Sunshine didn't answer within 30 seconds. Its latest log lines:"
+  run "journalctl -u $SR_SUN_UNIT -n 20 --no-pager -o cat"
+  exit 1
+fi
+
+# 7. Can it see a screen? (KMS capture needs an active output.)
+# shellcheck disable=SC2016  # expands on the Steam Machine
+LOG=$(run 'journalctl -u '"$SR_SUN_UNIT"' _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value '"$SR_SUN_UNIT"') --no-pager -o cat' 2>/dev/null)
+if grep -q "Unable to find display or encoder" <<<"$LOG"; then
+  warn "Sunshine is running but can't see a screen."
+  warn "Check the stream output (dummy plug) is fully plugged in, then run: steam-connect restart"
+  warn "Still nothing? See docs/displays.md."
+  exit 1
+fi
+say "Sunshine is ready. Web UI (while this window is open): https://localhost:$WEBUI_PORT"
+
+# 8. Game Mode black-screen workaround (Sunshine 2026.906+, LizardByte/Sunshine #5839):
+#    make gamescope draw onto one layer. It resets on reboot or mode switch.
+if [ "$BLACK_SCREEN_FIX" = yes ]; then
+  if run "$XPROP_FIX 1" >/dev/null 2>&1; then say "Applied the Game Mode black-screen workaround"
+  else warn "Couldn't apply the Game Mode black-screen workaround (fine in Desktop Mode)."; fi
+fi
+
+# 9. Moonlight.
+if [ "$STREAM" = 1 ]; then
+  say "Starting Moonlight ($MOONLIGHT_APP)"
+  # shellcheck disable=SC2086  # MOONLIGHT may be "flatpak run <id>"
+  setsid $MOONLIGHT stream "$TARGET" "$MOONLIGHT_APP" </dev/null >/dev/null 2>&1 9>&- &
+fi
+
+# 10. Stay open until you're done.
+echo
+say "Connected. Press Q to disconnect (or Ctrl+C, or close this window)."
+LOST=0
+while :; do
+  if read -rsn1 -t "$KEEPALIVE" key; then
+    case "$key" in q|Q) break ;; esac
+    continue
+  elif [ $? -le 128 ]; then
+    break   # no keyboard any more (the window went away)
+  fi
+  # Use the login now and then so it doesn't time out, and notice if it dropped.
+  if logged_in && run true >/dev/null 2>&1; then
+    [ "$LOST" = 1 ] && say "The login is back."
+    LOST=0
+  elif [ "$LOST" = 0 ]; then
+    warn "Lost the connection to the Steam Machine (asleep, or the network dropped). Press Q, then run steam-connect again."
+    LOST=1
+  fi
+done
+exit 0

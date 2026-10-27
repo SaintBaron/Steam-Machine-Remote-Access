@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+# steam-remote-setup: set up (or change) Steam Machine Remote Access from this PC.
+# https://github.com/SaintBaron/Steam-Machine-Remote-Access
+#
+# Usage:
+#   steam-remote-setup                     first-time setup, or re-run it safely
+#   steam-remote-setup displays            choose the stream and TV outputs again
+#   steam-remote-setup check               report problems on the Steam Machine
+#   steam-remote-setup update-server       send this version's server script and apply it
+#   steam-remote-setup add-client IP KEY.pub    allow another PC (its IP and public key)
+#   steam-remote-setup remove-client IP    stop allowing a PC
+#   steam-remote-setup remote              choose remote access (outside your home, through a VPN)
+#   steam-remote-setup remote off          turn remote access off for every PC
+#   steam-remote-setup uninstall-server    remove everything from the Steam Machine
+#   steam-remote-setup --version
+
+set -u
+LIB="${STEAM_REMOTE_SHARE:-$HOME/.local/share/steam-remote}/lib.sh"
+# shellcheck source=lib.sh source-path=SCRIPTDIR
+. "$LIB" 2>/dev/null || { echo "Can't find $LIB. Run the installer again." >&2; exit 1; }
+
+SERVER_SRC="$SR_SHARE/server/steam-remote-server.sh"
+MARK_BEGIN="# >>> steam-machine-remote >>>"
+MARK_END="# <<< steam-machine-remote <<<"
+
+ask() {   # ask PROMPT DEFAULT
+  local reply
+  read -r -p "$1${2:+ [$2]}: " reply </dev/tty
+  printf '%s' "${reply:-${2:-}}"
+}
+yes_no() { local r; r=$(ask "$1 (y/n)" "${2:-y}"); [[ "$r" =~ ^[Yy] ]]; }
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 isn't installed. $2"; }
+
+# --------------------------------------------------------------------- config
+write_config() {
+  mkdir -p "$SR_CONFIG_DIR"; chmod 700 "$SR_CONFIG_DIR"
+  local tmp; tmp=$(mktemp)
+  cat >"$tmp" <<EOF
+# Steam Machine Remote Access: this PC's settings. Plain KEY="value" lines; they're read,
+# not run. Re-run steam-remote-setup after changing MACHINE_IP, MACHINE_USER or HOST_ALIAS.
+
+# The Steam Machine's fixed IP (set a DHCP reservation for it in your router).
+MACHINE_IP="$MACHINE_IP"
+# The account on the Steam Machine (SteamOS uses "deck").
+MACHINE_USER="$MACHINE_USER"
+# The name used for it in ~/.ssh/config, so "ssh $HOST_ALIAS" works.
+HOST_ALIAS="$HOST_ALIAS"
+# The SSH key used for it.
+KEY_FILE="${KEY_FILE/#$HOME/\~}"
+
+# Remote access from outside your home (docs/remote-access.md). Change it with:
+#   steam-remote-setup remote
+# REMOTE_MODE: off (home network only), router, tailscale or other.
+REMOTE_MODE="$REMOTE_MODE"
+# This PC's address on the VPN (the Steam Machine allows it).
+REMOTE_PC_IP="$REMOTE_PC_IP"
+# The Steam Machine's address on the VPN, if it's not reachable at MACHINE_IP (Tailscale).
+REMOTE_MACHINE_IP="$REMOTE_MACHINE_IP"
+
+# Wake-on-LAN. The MAC is learned automatically; set it only to override.
+MACHINE_MAC="$MACHINE_MAC"
+# Leave empty to use the .255 address of a /24 home network (e.g. 192.168.0.255).
+BROADCAST="$BROADCAST"
+# Seconds to wait for it to wake up.
+WAKE_TIMEOUT="$WAKE_TIMEOUT"
+
+# The Sunshine app Moonlight opens ("Desktop" streams the whole screen).
+MOONLIGHT_APP="$MOONLIGHT_APP"
+# Name this PC is given in Sunshine's paired-devices list (empty = hostname).
+CLIENT_NAME="$CLIENT_NAME"
+# Local port for the web UI tunnel: https://localhost:$WEBUI_PORT
+WEBUI_PORT="$WEBUI_PORT"
+
+# The shared login closes itself after this long unused (if steam-connect was killed).
+PERSIST="$PERSIST"
+# While steam-connect is open, it uses the login every this-many seconds.
+KEEPALIVE="$KEEPALIVE"
+# Work around Sunshine's Game Mode black-screen bug (2026.906+). yes or no.
+BLACK_SCREEN_FIX="$BLACK_SCREEN_FIX"
+EOF
+  install -m 600 "$tmp" "$SR_CONFIG"; rm -f "$tmp"
+}
+
+config_wizard() {
+  say "Step 1 of 7: this PC's settings ($SR_CONFIG)"
+  if sr_parse_config "$SR_CONFIG" && valid_ip "$MACHINE_IP"; then
+    echo "   Steam Machine: $MACHINE_USER@$MACHINE_IP, SSH name '$HOST_ALIAS', key $KEY_FILE"
+    yes_no "   Keep these" y && return 0
+  fi
+  local ip
+  while :; do
+    ip=$(ask "   The Steam Machine's IP address (see the guide to find it)" "$MACHINE_IP")
+    valid_ip "$ip" && break
+    echo "   That isn't an IPv4 address like 192.168.0.50."
+  done
+  MACHINE_IP=$ip
+  MACHINE_USER=$(ask "   Its user name" "$MACHINE_USER")
+  [[ "$MACHINE_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "'$MACHINE_USER' isn't a valid user name."
+  HOST_ALIAS=$(ask "   A short SSH name for it" "$HOST_ALIAS")
+  [[ "$HOST_ALIAS" =~ ^[A-Za-z0-9._-]+$ ]] || die "Use only letters, numbers, . _ - in the SSH name."
+  write_config
+  say "Saved $SR_CONFIG (edit it any time; see the comments inside)"
+}
+
+# --------------------------------------------------------------------- remote access
+REMOTE_ADD=""; REMOTE_DEL=""
+ask_ip() {   # PROMPT DEFAULT [optional]: prints an IPv4 address (or nothing, when optional)
+  local v
+  while :; do
+    v=$(ask "$1" "$2")
+    if [ -z "$v" ] && [ -n "${3:-}" ]; then return 0; fi
+    valid_ip "$v" && { printf '%s' "$v"; return 0; }
+    echo "   That isn't an IPv4 address (like 10.6.0.2)." >&2
+  done
+}
+
+remote_wizard() {
+  local old_pc=$REMOTE_PC_IP old_mode=$REMOTE_MODE current=1 choice ts=""
+  case "$REMOTE_MODE" in router) current=2 ;; tailscale) current=3 ;; other) current=4 ;; esac
+  say "Step 2 of 7: remote access (optional)"
+  echo "   By default only your home network can connect. You can also let this PC connect"
+  echo "   from elsewhere, through a VPN. Nothing is ever opened to the internet directly."
+  echo "   How each option works and how to set it up: docs/remote-access.md"
+  echo
+  echo "     1) No, home network only            Nothing else to set up (default)"
+  echo "     2) Yes, through a VPN on my router  WireGuard or OpenVPN on the router, UniFi Teleport..."
+  echo "     3) Yes, through Tailscale           Tailscale on this PC and on the Steam Machine"
+  echo "     4) Yes, through another VPN         You enter the addresses yourself"
+  echo
+  echo "   Away from home, the Steam Machine must already be awake: Wake-on-LAN only works at home."
+  while :; do
+    choice=$(ask "   Choose 1, 2, 3 or 4" "$current")
+    [[ "$choice" =~ ^[1-4]$ ]] && break
+    echo "   Type 1, 2, 3 or 4."
+  done
+  # Offer the old addresses as defaults only when keeping the same kind of VPN.
+  case "$choice" in 2) [ "$old_mode" = router ] ;; 3) [ "$old_mode" = tailscale ] ;; 4) [ "$old_mode" = other ] ;; *) true ;; esac \
+    || { REMOTE_PC_IP=""; REMOTE_MACHINE_IP=""; }
+  case "$choice" in
+    1) REMOTE_MODE=off; REMOTE_PC_IP=""; REMOTE_MACHINE_IP="" ;;
+    2) REMOTE_MODE=router; REMOTE_MACHINE_IP=""
+       echo "   This PC's address on your router's VPN is shown in the VPN app once connected, or in"
+       echo "   the router's list of VPN clients. Give it a fixed address there if you can."
+       REMOTE_PC_IP=$(ask_ip "   This PC's VPN address (Enter to add it later)" "$REMOTE_PC_IP" optional) ;;
+    3) REMOTE_MODE=tailscale
+       command -v tailscale >/dev/null 2>&1 && ts=$(tailscale ip -4 2>/dev/null | head -n 1)
+       echo "   Tailscale addresses start with 100. Find them with 'tailscale ip -4' on each device,"
+       echo "   or on the Machines page of the Tailscale admin console."
+       REMOTE_PC_IP=$(ask_ip "   This PC's Tailscale address (Enter to add it later)" "${REMOTE_PC_IP:-$ts}" optional)
+       REMOTE_MACHINE_IP=$(ask_ip "   The Steam Machine's Tailscale address (Enter to add it later)" "$REMOTE_MACHINE_IP" optional) ;;
+    4) REMOTE_MODE=other
+       REMOTE_PC_IP=$(ask_ip "   This PC's address on the VPN (Enter to add it later)" "$REMOTE_PC_IP" optional)
+       echo "   If the Steam Machine has its own address on that VPN, enter it. If the VPN reaches"
+       echo "   your home network (like a router VPN does), leave it empty."
+       REMOTE_MACHINE_IP=$(ask_ip "   The Steam Machine's VPN address (Enter if none)" "$REMOTE_MACHINE_IP" optional) ;;
+  esac
+  REMOTE_ADD=""; REMOTE_DEL=""
+  if [ -n "$old_pc" ] && [ "$old_pc" != "$REMOTE_PC_IP" ]; then REMOTE_DEL=$old_pc; fi
+  if [ -n "$REMOTE_PC_IP" ]; then REMOTE_ADD=$REMOTE_PC_IP; fi
+  if [ "$REMOTE_MODE" != off ] && [ -z "$REMOTE_PC_IP" ]; then
+    warn "Remote access stays off for this PC until you add its VPN address: steam-remote-setup remote"
+  fi
+  write_config
+}
+
+# Arguments for the Steam Machine's script that apply the remote-access choice.
+remote_args() {
+  local a=""
+  [ -n "$REMOTE_DEL" ] && a+=" --remote-remove $REMOTE_DEL"
+  [ -n "$REMOTE_ADD" ] && a+=" --remote-add $REMOTE_ADD"
+  printf '%s' "$a"
+}
+
+# --------------------------------------------------------------------- SSH key and ~/.ssh/config
+ssh_block_exists_outside_marks() {
+  [ -f "$HOME/.ssh/config" ] || return 1
+  awk -v b="$MARK_BEGIN" -v e="$MARK_END" -v h="$HOST_ALIAS" '
+    $0 == b {skip = 1; next} $0 == e {skip = 0; next}
+    !skip && tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == h) found = 1 }
+    END { exit !found }' "$HOME/.ssh/config"
+}
+
+setup_ssh() {
+  say "Step 3 of 7: SSH key and ~/.ssh/config"
+  mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+
+  if ssh_block_exists_outside_marks; then
+    local existing
+    existing=$(ssh -G "$HOST_ALIAS" 2>/dev/null | awk '$1 == "identityfile" {print $2; exit}')
+    existing=${existing/#\~/$HOME}
+    warn "$HOME/.ssh/config already has its own 'Host $HOST_ALIAS' entry, so it's left as it is."
+    if [ -n "$existing" ] && [ -f "$existing" ]; then KEY_FILE=$existing; write_config; fi
+    echo "   Make sure it has: HostName $MACHINE_IP, HostKeyAlias $HOST_ALIAS, User $MACHINE_USER, IdentityFile $KEY_FILE, IdentitiesOnly yes"
+  fi
+
+  if [ ! -f "$KEY_FILE" ]; then
+    echo "   Creating an SSH key for the Steam Machine. Set a passphrase when asked: it's"
+    echo "   one of the two things needed to log in, so don't leave it empty."
+    ssh-keygen -t ed25519 -f "$KEY_FILE" -C "steam-remote@$(hostname)" </dev/tty || die "ssh-keygen failed."
+  else
+    echo "   Using the existing key $KEY_FILE"
+  fi
+  if ssh-keygen -y -P "" -f "$KEY_FILE" >/dev/null 2>&1; then
+    warn "$KEY_FILE has no passphrase, so anyone who copies that file only needs the password."
+    echo "   Add one now with: ssh-keygen -p -f $KEY_FILE"
+  fi
+  [ -f "$KEY_FILE.pub" ] || die "$KEY_FILE.pub is missing. Recreate it with: ssh-keygen -y -f $KEY_FILE > $KEY_FILE.pub"
+
+  if ! ssh_block_exists_outside_marks; then
+    local cfg="$HOME/.ssh/config" tmp
+    touch "$cfg"; chmod 600 "$cfg"
+    tmp=$(mktemp)
+    # Our block goes first: ssh uses the first value it finds for each setting.
+    {
+      echo "$MARK_BEGIN"
+      echo "# Written by steam-remote-setup; it replaces this block when re-run."
+      echo "Host $HOST_ALIAS"
+      echo "    HostName $MACHINE_IP"
+      echo "    HostKeyAlias $HOST_ALIAS"
+      echo "    User $MACHINE_USER"
+      echo "    IdentityFile ${KEY_FILE/#$HOME/\~}"
+      echo "    IdentitiesOnly yes"
+      echo "    ServerAliveInterval 15"
+      echo "    ServerAliveCountMax 4"
+      echo "$MARK_END"
+      echo
+      awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0 == b {skip = 1; next} $0 == e {skip = 0; if ((getline line) > 0 && line != "") print line; next} !skip' "$cfg"
+    } >"$tmp"
+    cat "$tmp" >"$cfg"; rm -f "$tmp"
+    echo "   Added 'Host $HOST_ALIAS' to ~/.ssh/config"
+  fi
+}
+
+# --------------------------------------------------------------------- Steam Machine
+upload_and_setup() {
+  say "Step 4 of 7: reach the Steam Machine"
+  find_target || die "No reply from $MACHINE_IP${REMOTE_MACHINE_IP:+ or $REMOTE_MACHINE_IP}. Check it's on, awake and wired, and that SSH is on (Part 2 of the guide)."
+  [ "$TARGET" = "$MACHINE_IP" ] || say "Using its VPN address, $TARGET"
+  port_open 22 || die "$TARGET answers but SSH doesn't. At the Steam Machine run: sudo systemctl enable --now sshd"
+  learn_mac
+
+  say "Step 5 of 7: copy the setup to the Steam Machine"
+  if ! ssh-keygen -F "$HOST_ALIAS" >/dev/null 2>&1; then
+    cat <<'EOT'
+   First connection: SSH shows the Steam Machine's fingerprint (SHA256:...) and asks
+   "Are you sure you want to continue connecting?". Compare it with the fingerprint you
+   noted at the Steam Machine. Type yes ONLY if they match exactly; otherwise type no
+   and see docs/security.md.
+EOT
+  fi
+  echo "   Log in with the $MACHINE_USER password (and your key passphrase, if asked)."
+  local tmpd; tmpd=$(mktemp -d)
+  cp "$SERVER_SRC" "$tmpd/steam-remote-server.sh"
+  cp "$KEY_FILE.pub" "$tmpd/steam-remote-client.pub"
+  scp -q -o ControlPath=none -o HostName="$TARGET" "$tmpd/steam-remote-server.sh" "$tmpd/steam-remote-client.pub" "$HOST_ALIAS:" \
+    || { rm -rf "$tmpd"; die "Couldn't copy the files. Check the password, and that this PC's IP hasn't changed."; }
+  rm -rf "$tmpd"
+
+  say "Step 6 of 7: set up the Steam Machine"
+  echo "   Log in again, then sudo asks for the $MACHINE_USER password once more."
+  local cmd
+  # SSH_CLIENT expands on the Steam Machine: the IP it sees for this PC. Through a VPN that's
+  # the VPN address, which is added as a remote address rather than a home one.
+  # shellcheck disable=SC2016
+  if [ "$TARGET" = "$MACHINE_IP" ] && on_home_network; then
+    cmd='sudo bash ~/steam-remote-server.sh --setup --client-ip "${SSH_CLIENT%% *}"'
+  else
+    cmd='sudo bash ~/steam-remote-server.sh --setup'
+  fi
+  # shellcheck disable=SC2016  # $? expands on the Steam Machine
+  cmd+=" --pubkey ~/steam-remote-client.pub$(remote_args)"'; rc=$?; rm -f ~/steam-remote-server.sh ~/steam-remote-client.pub; exit $rc'
+  ssh -t -o ControlPath=none -o HostName="$TARGET" "$HOST_ALIAS" "$cmd" \
+    || die "The Steam Machine setup didn't finish. Read its messages above; it's safe to run steam-remote-setup again."
+}
+
+verify_login() {
+  say "Step 7 of 7: check a fresh login needs your key AND the password"
+  if ssh -o ControlPath=none -o HostName="$TARGET" "$HOST_ALIAS" 'echo "   key and password accepted"'; then
+    say "Setup complete."
+    cat <<EOF
+
+   Next:
+     1. In one window:   steam-connect nostream
+     2. In another:      steam-pair login     (create Sunshine's web UI login)
+                         steam-pair           (pair Moonlight; follow the prompts)
+     3. Press Q in the first window. From now on, just run: steam-connect
+EOF
+  else
+    die "That login failed. See docs/troubleshooting.md (Login problems)."
+  fi
+}
+
+# --------------------------------------------------------------------- remote helpers for the other commands
+remote_sudo() {   # run the installed server script with sudo, interactively
+  load_config
+  ensure_awake quiet
+  # shellcheck disable=SC2029
+  ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "sudo $SR_SERVER $*"
+}
+
+update_server() {
+  load_config
+  ensure_awake quiet
+  [ -f "$SERVER_SRC" ] || die "Can't find $SERVER_SRC. Run the installer again."
+  say "Sending $(bash "$SERVER_SRC" --version) to the Steam Machine"
+  scp -q -o HostName="$TARGET" "$SERVER_SRC" "$HOST_ALIAS:steam-remote-server.sh" || die "Copy failed."
+  # shellcheck disable=SC2029
+  ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "sudo install -o root -g root -m 755 ~/steam-remote-server.sh $SR_SERVER && rm -f ~/steam-remote-server.sh && sudo $SR_SERVER"
+}
+
+add_client() {
+  local ip=${1:-} key=${2:-}
+  { valid_ip "$ip" && [ -f "$key" ]; } || die "Usage: steam-remote-setup add-client IP KEY.pub   (the other PC's fixed IP and its public key file)"
+  grep -qE '^(ssh-|ecdsa-|sk-)' "$key" || die "$key doesn't look like an SSH public key (.pub)."
+  load_config
+  ensure_awake quiet
+  scp -q -o HostName="$TARGET" "$key" "$HOST_ALIAS:steam-remote-client.pub" || die "Copy failed."
+  # shellcheck disable=SC2029
+  ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "sudo $SR_SERVER --add-client $ip --pubkey ~/steam-remote-client.pub; rm -f ~/steam-remote-client.pub"
+}
+
+# --------------------------------------------------------------------- main
+case "${1:-}" in
+  "")
+    need ssh "Install OpenSSH (see the guide)."; need ssh-keygen "Install OpenSSH."; need scp "Install OpenSSH."
+    need setsid "Install util-linux."; need pgrep "Install procps."; need timeout "Install coreutils."; need ss "Install iproute2."
+    need python3 "Install python3."; need ip "Install iproute2."; need flock "Install util-linux."; need ping "Install iputils."
+    [ -f "$SERVER_SRC" ] || die "Can't find $SERVER_SRC. Run the installer again."
+    [ -n "$(moonlight_cmd)" ] || warn "Moonlight isn't installed yet. You'll need it to stream (see the guide)."
+    config_wizard
+    load_config
+    remote_wizard
+    setup_ssh
+    upload_and_setup
+    verify_login
+    ;;
+  displays)         remote_sudo --displays ;;
+  remote)
+    load_config
+    if [ "${2:-}" = off ]; then
+      echo "This turns remote access off for every PC (home network only)."
+      yes_no "Continue" y || exit 0
+      remote_sudo --set-remote off
+      REMOTE_MODE=off; REMOTE_PC_IP=""; REMOTE_MACHINE_IP=""; write_config
+    else
+      remote_wizard
+      args=$(remote_args)
+      if [ -n "$args" ]; then
+        # shellcheck disable=SC2086  # separate options on purpose
+        remote_sudo $args
+      else
+        say "Nothing to change on the Steam Machine."
+      fi
+    fi ;;
+  check)            load_config; ensure_awake quiet; ssh -o HostName="$TARGET" "$HOST_ALIAS" "$SR_SERVER" --check ;;
+  update-server)    update_server ;;
+  add-client)       shift; add_client "$@" ;;
+  remove-client)    valid_ip "${2:-}" || die "Usage: steam-remote-setup remove-client IP"; remote_sudo --remove-client "$2" ;;
+  uninstall-server)
+    load_config
+    echo "This removes everything from the Steam Machine, uninstalls Sunshine and turns SSH off."
+    yes_no "Continue" n || exit 0
+    remote_sudo --uninstall ;;
+  --version)        echo "steam-remote-setup $SR_VERSION" ;;
+  -h|--help)        sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *)                die "Unknown command '$1'. Try: steam-remote-setup --help" ;;
+esac
