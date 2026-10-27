@@ -53,10 +53,10 @@ Wake-on-LAN stays switched on in NetworkManager, which is harmless. To turn it o
 ## 2. A Linux PC
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash -s -- --uninstall
 ```
 
-Or, from a clone: `./install.sh --uninstall`. Use `--purge` instead to also delete `~/.config/steam-remote`.
+Or, from a clone: `bash install.sh --uninstall`. Use `--purge` instead to also delete `~/.config/steam-remote`.
 
 This removes the commands, launchers and icons. Then, if you like:
 
@@ -71,7 +71,7 @@ Finally, delete the block between `# >>> steam-machine-remote >>>` and `# <<< st
 ## 3. A Windows PC
 
 ```powershell
-$env:STEAM_REMOTE_UNINSTALL = '1'; irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.ps1 | iex; Remove-Item Env:STEAM_REMOTE_UNINSTALL
+$env:STEAM_REMOTE_UNINSTALL = '1'; irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.ps1 | iex; Remove-Item Env:STEAM_REMOTE_UNINSTALL
 ```
 
 This removes the scripts, shortcuts and PATH entry. Then, if you like:

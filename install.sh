@@ -3,12 +3,12 @@
 # (Arch, CachyOS, Manjaro, EndeavourOS, Debian, Ubuntu, Linux Mint, Pop!_OS...).
 # https://github.com/SaintBaron/Steam-Machine-Remote-Access
 #
-#   curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.sh | bash
-#   ./install.sh                 from a cloned copy of the repo
+#   curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash
+#   bash install.sh              from a cloned or downloaded copy of the repo
 #
 # Options:
 #   --no-deps      don't install system packages or Moonlight
-#   --ref REF      install a different tag or branch (default: this release) (download mode only)
+#   --ref REF      install a tag or branch instead of main (download mode only)
 #   --uninstall    remove the commands, launchers and icons (keeps your config and SSH key)
 #   --purge        --uninstall, and also delete the config
 #
@@ -22,7 +22,7 @@
 set -euo pipefail
 
 REPO="${STEAM_REMOTE_REPO:-SaintBaron/Steam-Machine-Remote-Access}"
-REF="v1.0.0"   # the release this installer belongs to
+REF="main"
 DEPS=1
 ACTION=install
 
@@ -74,7 +74,7 @@ if [ -n "$here" ] && [ -f "$here/linux/steam-connect" ] && [ -f "$here/server/st
   SRC=$here
   say "Installing from $SRC"
 else
-  command -v curl >/dev/null 2>&1 || die "curl is needed to download. Install it, or clone the repo and run ./install.sh"
+  command -v curl >/dev/null 2>&1 || die "curl is needed to download. Install it, or clone the repo and run: bash install.sh"
   SRC=$(mktemp -d)
   trap 'rm -rf "$SRC"' EXIT
   say "Downloading $REPO ($REF)"

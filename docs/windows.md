@@ -186,21 +186,21 @@ Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
 In a normal (not administrator) PowerShell window:
 
 ```powershell
-irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.ps1 | iex
+irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.ps1 | iex
 ```
 
 <details>
 <summary>Prefer to read the script before running it?</summary>
 
 ```powershell
-irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.ps1 -OutFile $env:TEMP\steam-remote-install.ps1
+irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.ps1 -OutFile $env:TEMP\steam-remote-install.ps1
 notepad $env:TEMP\steam-remote-install.ps1
 powershell -ExecutionPolicy Bypass -File $env:TEMP\steam-remote-install.ps1
 ```
 
 Or download the repository (**Code > Download ZIP** on GitHub), unzip it, and run `powershell -ExecutionPolicy Bypass -File .\install.ps1` in that folder.
 
-The command installs a fixed, tagged release rather than whatever is newest, so what you install is what was reviewed.
+To install a specific tagged release instead of the latest code, see [the one-line installers](security.md#the-one-line-installers).
 
 </details>
 
@@ -500,10 +500,10 @@ If your router gave this PC a new address, the Steam Machine won't accept it. Fr
 <details>
 <summary><b>Updating</b></summary>
 
-**This project.** When a new version is released, run the install command from this guide again (the guide always shows the latest version), then send the new server script to the Steam Machine:
+**This project.** Run the install command again to get the latest version, then send the new server script to the Steam Machine:
 
 ```powershell
-irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.ps1 | iex
+irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.ps1 | iex
 steam-remote-setup.ps1 update-server
 ```
 

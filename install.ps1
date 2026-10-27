@@ -2,12 +2,12 @@
 # https://github.com/SaintBaron/Steam-Machine-Remote-Access
 #
 # In PowerShell (no admin needed):
-#   irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.ps1 | iex
 # Or from a cloned/downloaded copy of the repo:
 #   powershell -ExecutionPolicy Bypass -File .\install.ps1
 #
 # Options (environment variables, because "irm | iex" can't take parameters):
-#   $env:STEAM_REMOTE_REF = 'v1.0.0'     install a different tag or branch (default: this release)
+#   $env:STEAM_REMOTE_REF = 'v1.0.0'     install a tag or branch instead of main
 #   $env:STEAM_REMOTE_UNINSTALL = '1'    remove the scripts, shortcuts and PATH entry (keeps your config)
 #
 # Installs into %LOCALAPPDATA%\steam-remote, adds Start menu and desktop shortcuts,
@@ -15,7 +15,7 @@
 
 $ErrorActionPreference = 'Stop'
 $Repo = if ($env:STEAM_REMOTE_REPO) { $env:STEAM_REMOTE_REPO } else { 'SaintBaron/Steam-Machine-Remote-Access' }
-$Ref  = if ($env:STEAM_REMOTE_REF)  { $env:STEAM_REMOTE_REF }  else { 'v1.0.0' }   # the release this installer belongs to
+$Ref  = if ($env:STEAM_REMOTE_REF)  { $env:STEAM_REMOTE_REF }  else { 'main' }
 $Dest = Join-Path $env:LOCALAPPDATA 'steam-remote'
 $StartDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Steam Machine Remote'
 $Desktop  = [Environment]::GetFolderPath('Desktop')

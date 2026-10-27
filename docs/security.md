@@ -161,7 +161,17 @@ During setup, the server script is copied into `deck`'s home and run with sudo. 
 
 ### The one-line installers
 
-The install commands download a **fixed, tagged release** (for example `v1.0.0`), not whatever is newest on the main branch. Each release is a snapshot you or anyone else can review on GitHub before running it. If you'd rather read everything first, download or clone the repository at that tag, read the scripts, and run `./install.sh` (or `install.ps1`) from your copy: it then installs from your copy without downloading anything.
+The one-line install commands run whatever is on the `main` branch at that moment. To install a specific tagged release instead (once the repository has release tags), pass the tag:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash -s -- --ref v1.0.0
+```
+
+```powershell
+$env:STEAM_REMOTE_REF = 'v1.0.0'; irm https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.ps1 | iex
+```
+
+If you'd rather read everything first, download or clone the repository, read the scripts, and run `bash install.sh` (or `install.ps1`) from your copy. It then installs from your copy without downloading anything.
 
 ## Host key fingerprint mismatch
 

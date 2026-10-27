@@ -170,14 +170,14 @@ Head back to your PC.
 ### 1. Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash
 ```
 
 <details>
 <summary>Prefer to read the script before running it, or install from a clone?</summary>
 
 ```sh
-curl -fsSLo /tmp/steam-remote-install.sh https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.sh
+curl -fsSLo /tmp/steam-remote-install.sh https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh
 less /tmp/steam-remote-install.sh
 bash /tmp/steam-remote-install.sh
 ```
@@ -187,10 +187,10 @@ Or clone the repository and run the installer from it (it then uses your local c
 ```sh
 git clone https://github.com/SaintBaron/Steam-Machine-Remote-Access.git
 cd Steam-Machine-Remote-Access
-./install.sh
+bash install.sh
 ```
 
-The command installs a fixed, tagged release rather than whatever is newest, so what you install is what was reviewed.
+To install a specific tagged release instead of the latest code, see [the one-line installers](security.md#the-one-line-installers).
 
 </details>
 
@@ -502,10 +502,10 @@ If your router gave this PC a new address, the Steam Machine won't accept it. Fr
 <details>
 <summary><b>Updating</b></summary>
 
-**This project.** When a new version is released, run the install command from this guide again (the guide always shows the latest version), then send the new server script to the Steam Machine:
+**This project.** Run the install command again to get the latest version, then send the new server script to the Steam Machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/v1.0.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash
 steam-remote-setup update-server
 ```
 
