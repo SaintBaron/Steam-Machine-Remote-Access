@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# steam-wake: wake the Steam Machine with Wake-on-LAN if it's asleep, and wait until SSH answers.
+# https://github.com/SaintBaron/Steam-Machine-Remote-Access
+#
+# Usage:
+#   steam-wake          wake it (if needed) and wait
+#   steam-wake --ssh    what ~/.ssh/config runs before every "ssh steam-machine" or scp: the
+#                       same, but silent when it's already awake, and it never changes which
+#                       SSH settings apply
+#
+# steam-connect, steam-ssh and steam-remote-setup wake it themselves, so they skip this.
+
+set -u
+SSH_MODE=0
+case "${1:-}" in
+  --ssh) SSH_MODE=1 ;;
+  --version|-h|--help) ;;
+  "") ;;
+  *) echo "Unknown option '$1'. Try: steam-wake --help" >&2; exit 2 ;;
+esac
+
+if [ "$SSH_MODE" = 1 ]; then
+  # From ~/.ssh/config: everything goes to the terminal (stderr), never to stdout, which may
+  # be carrying scp's or another program's data. Exit 1 so the (empty) Match block never
+  # applies anything.
+  exec 1>&2
+  [ -n "${STEAM_REMOTE_NOWAKE:-}" ] && exit 1   # one of this project's commands: it already woke it
+fi
+
+LIB="${STEAM_REMOTE_SHARE:-$HOME/.local/share/steam-remote}/lib.sh"
+# shellcheck source=lib.sh source-path=SCRIPTDIR
+. "$LIB" 2>/dev/null || { echo "Can't find $LIB. Run the installer again." >&2; exit 1; }
+
+case "${1:-}" in
+  --version) echo "steam-wake $SR_VERSION"; exit 0 ;;
+  -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+
+if [ "$SSH_MODE" = 1 ]; then
+  load_config 2>/dev/null || exit 1
+  # Already connected through steam-connect's shared login, or awake: nothing to do, quickly.
+  [ -S "$CTL" ] && exit 1
+  ping_ok "$MACHINE_IP" && exit 1
+  # Wake-on-LAN only works from the home network; through a VPN, leave it to ssh.
+  on_home_network || exit 1
+  ( ensure_awake verbose ) || true   # prints what it's doing; a failure is left for ssh to report
+  exit 1
+fi
+
+load_config
+ensure_awake verbose
+learn_mac

@@ -10,12 +10,14 @@ Every file, service, command and setting, for when you want to know exactly what
 | `steam-connect restart` | `steam-connect.ps1 -Restart` | Same, restarting Sunshine first |
 | `steam-connect nostream` | *Steam Machine - Connect (no stream)* | Everything except Moonlight (for pairing or the web UI) |
 | `steam-connect disconnect` | (not needed) | Clean up after a crash |
+| `steam-wake` | (not needed: use `steam-ssh.ps1`) | Wake the Steam Machine and wait until it answers. Plain `ssh steam-machine` and `scp` run it by themselves |
 | `steam-ssh [command]` | *Steam Machine - SSH* / `steam-ssh.ps1 [command]` | A terminal on the Steam Machine, or run one command there |
 | `steam-pair login` / `steam-pair` | `steam-pair.ps1 -Login` / `steam-pair.ps1` | Create Sunshine's web UI login / pair Moonlight |
 | `steam-remote-setup` | *Steam Machine - Setup* | First-time setup; safe to re-run |
 | `steam-remote-setup displays` | `steam-remote-setup.ps1 displays` | Choose the stream and TV outputs again |
 | `steam-remote-setup remote` | `steam-remote-setup.ps1 remote` | Remote access on or off, or change VPN addresses |
 | `steam-remote-setup remote off` | `steam-remote-setup.ps1 remote off` | Remote access off for every PC |
+| `steam-remote-setup ssh-config` | (none) | Rewrite this project's block in `~/.ssh/config`. The installer does this when updating |
 | `steam-remote-setup auth` | `steam-remote-setup.ps1 auth` | What a login needs: key and password (default), or key only ([security.md](security.md#key-only-logins)) |
 | `steam-remote-setup quality` | `steam-remote-setup.ps1 quality` | Stream resolution, frame rate, bitrate, codec, HDR and the encoder preset ([quality.md](quality.md)) |
 | `steam-remote-setup check` | `steam-remote-setup.ps1 check` | Report problems on the Steam Machine |
@@ -102,7 +104,7 @@ Values are parsed and validated, never run as code. After editing, apply with `s
 
 | Path | What it is |
 | --- | --- |
-| `~/.local/bin/steam-connect`, `steam-ssh`, `steam-pair`, `steam-remote-setup` | The commands |
+| `~/.local/bin/steam-connect`, `steam-ssh`, `steam-wake`, `steam-pair`, `steam-remote-setup` | The commands |
 | `~/.local/share/steam-remote/lib.sh` | Code shared by the commands |
 | `~/.local/share/steam-remote/server/steam-remote-server.sh` | The server script that setup sends to the Steam Machine |
 | `~/.local/share/applications/steam-remote-*.desktop` | App-menu launchers (Linux) |
@@ -113,7 +115,7 @@ Values are parsed and validated, never run as code. After editing, apply with `s
 | `~/.local/state/steam-remote/disconnect.log` | Output of disconnects done after the window was closed |
 | `~/.local/state/steam-remote/moonlight.log` | Moonlight's messages from the last stream `steam-connect` started |
 | `~/.ssh/steam-machine_ed25519` (+ `.pub`) | The SSH key (default name) |
-| `~/.ssh/config` | The `Host steam-machine` block between `# >>> steam-machine-remote >>>` markers |
+| `~/.ssh/config` | The `Host steam-machine` block between `# >>> steam-machine-remote >>>` markers, with a `Match ... exec` line that runs `steam-wake --ssh` so plain `ssh` and `scp` wake the Steam Machine |
 | `~/.ssh/cm-steam-machine` | The shared-login socket, while connected |
 
 ## On a Windows PC

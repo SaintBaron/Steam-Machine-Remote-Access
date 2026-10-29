@@ -284,7 +284,7 @@ It shows the stream settings that Connect hands to Moonlight on every connection
 
 It creates an SSH key at `~/.ssh/steam-machine_ed25519` and asks for a **passphrase**. Choose a good one and save it in your password manager: logins need this passphrase **and** the Steam Machine's password. If you already have a key there, it's reused.
 
-It also adds a `Host steam-machine` block to the top of `~/.ssh/config`, between `# >>> steam-machine-remote >>>` markers. This is what makes `ssh steam-machine` work. Its `HostKeyAlias` line lets SSH recognise the Steam Machine at either its home or its VPN address. If you already had your own `Host steam-machine` entry, it's left alone and the setup tells you what it should contain.
+It also adds a `Host steam-machine` block to the top of `~/.ssh/config`, between `# >>> steam-machine-remote >>>` markers. This is what makes `ssh steam-machine` work. Its `HostKeyAlias` line lets SSH recognise the Steam Machine at either its home or its VPN address. Its `Match ... exec` line runs `steam-wake` first, so plain `ssh steam-machine` and `scp` wake the Steam Machine if it's asleep (when you're at home); when it's awake that's just one quick ping. If you already had your own `Host steam-machine` entry, it's left alone and the setup tells you what it should contain.
 
 ### Steps 5 and 6: First connection
 
@@ -451,6 +451,7 @@ You want `OK`, `OK` and `All present.`
 | `steam-connect nostream` | | Everything except Moonlight: for pairing or the web UI |
 | `steam-ssh` | Steam Machine - SSH | A terminal on the Steam Machine (wakes it first) |
 | `steam-ssh <command>` | | Run one command there, e.g. `steam-ssh uptime` |
+| `steam-wake` | | Just wake it (Wake-on-LAN) and wait until it answers. Plain `ssh steam-machine` and `scp` do this by themselves |
 | `steam-pair login` / `steam-pair` | | Create or change the web UI login / pair Moonlight |
 | `steam-connect disconnect` | | Clean up after a crash: stop Sunshine, back to the TV, close every SSH connection to the Steam Machine |
 | `steam-remote-setup quality` | | Stream resolution, bitrate, codec, HDR and the encoder preset |

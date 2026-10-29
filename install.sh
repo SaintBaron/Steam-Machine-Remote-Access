@@ -13,7 +13,7 @@
 #   --purge        --uninstall, and also delete the config
 #
 # Installs, all inside your home folder (no root needed except for system packages):
-#   ~/.local/bin/                       steam-connect, steam-ssh, steam-pair, steam-remote-setup
+#   ~/.local/bin/                       steam-connect, steam-ssh, steam-wake, steam-pair, steam-remote-setup
 #   ~/.local/share/steam-remote/        shared code and the Steam Machine's server script
 #   ~/.local/share/applications/        app-menu launchers (Linux)
 #   ~/.local/share/icons/hicolor/...    their icons (Linux)
@@ -32,7 +32,7 @@ SHARE="$HOME/.local/share/steam-remote"
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/steam-remote"
-COMMANDS=(steam-connect steam-ssh steam-pair steam-remote-setup)
+COMMANDS=(steam-connect steam-ssh steam-wake steam-pair steam-remote-setup)
 MAC_APPS="$HOME/Applications"
 IS_MAC=0; [ "$(uname -s)" = Darwin ] && IS_MAC=1
 
@@ -83,7 +83,7 @@ else
   trap 'rm -rf "$SRC"' EXIT
   say "Downloading $REPO ($REF)"
   base="https://raw.githubusercontent.com/$REPO/$REF"
-  for f in linux/lib.sh linux/steam-connect linux/steam-ssh linux/steam-pair linux/steam-remote-setup \
+  for f in linux/lib.sh linux/steam-connect linux/steam-ssh linux/steam-wake linux/steam-pair linux/steam-remote-setup \
            server/steam-remote-server.sh assets/icons/steam-remote-connect.svg assets/icons/steam-remote-ssh.svg \
            config.example VERSION; do
     mkdir -p "$SRC/$(dirname "$f")"
@@ -209,6 +209,14 @@ case ":$PATH:" in
     echo "   zsh:   echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
     ;;
 esac
+
+# Already set up: refresh this project's block in ~/.ssh/config (it gained a wake step in 1.2.0).
+if [ -f "$CONFIG_DIR/config" ] && grep -qxF "# >>> steam-machine-remote >>>" "$HOME/.ssh/config" 2>/dev/null; then
+  "$BIN/steam-remote-setup" ssh-config || warn "Couldn't update ~/.ssh/config. Run: steam-remote-setup ssh-config"
+  echo
+  say "Updated. If the Steam Machine needs the new version too: steam-remote-setup update-server"
+  exit 0
+fi
 
 echo
 say "Next (Part 4 of your guide): run steam-remote-setup. Do Part 2, at the Steam Machine, first if you haven't."

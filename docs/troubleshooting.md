@@ -86,6 +86,8 @@ Last resort: `sudo /home/.steam-remote/steam-remote-server.sh --uninstall --keep
 5. **Is the packet reaching it?** Both devices must be on the same network: no guest network, VLAN or AP isolation between them. If your network isn't a `/24` (for example `255.255.0.0`), set `BROADCAST` in your config to its broadcast address (Linux: `ip -4 addr` shows it after `brd`).
 6. **Router or switch** "green Ethernet" or energy-saving features sometimes drop the link of a sleeping device. Try turning them off.
 
+**Plain `ssh steam-machine` or `scp` says `No route to host` or times out, and doesn't try to wake it** (Linux and macOS): the `~/.ssh/config` block is from before 1.2.0, or you have your own `Host steam-machine` entry. Run `steam-remote-setup ssh-config`, or wake it first with `steam-wake`. On Windows, plain `ssh` never wakes it; use `steam-ssh.ps1`.
+
 ## Remote access
 
 | Symptom | Cause | Fix |

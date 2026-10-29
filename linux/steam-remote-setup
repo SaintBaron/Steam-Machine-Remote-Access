@@ -13,6 +13,7 @@
 #   steam-remote-setup remote off          turn remote access off for every PC
 #   steam-remote-setup quality             choose the stream's resolution, bitrate, HDR and encoder preset
 #   steam-remote-setup auth                choose what a login needs: key and password, or key only
+#   steam-remote-setup ssh-config          rewrite this project's block in ~/.ssh/config (after an update)
 #   steam-remote-setup uninstall-server    remove everything from the Steam Machine
 #   steam-remote-setup --version
 
@@ -344,28 +345,39 @@ setup_ssh() {
   [ -f "$KEY_FILE.pub" ] || die "$KEY_FILE.pub is missing. Recreate it with: ssh-keygen -y -f $KEY_FILE > $KEY_FILE.pub"
 
   if ! ssh_block_exists_outside_marks; then
-    local cfg="$HOME/.ssh/config" tmp
-    touch "$cfg"; chmod 600 "$cfg"
-    tmp=$(mktemp)
-    # Our block goes first: ssh uses the first value it finds for each setting.
-    {
-      echo "$MARK_BEGIN"
-      echo "# Written by steam-remote-setup; it replaces this block when re-run."
-      echo "Host $HOST_ALIAS"
-      echo "    HostName $MACHINE_IP"
-      echo "    HostKeyAlias $HOST_ALIAS"
-      echo "    User $MACHINE_USER"
-      echo "    IdentityFile ${KEY_FILE/#$HOME/\~}"
-      echo "    IdentitiesOnly yes"
-      echo "    ServerAliveInterval 15"
-      echo "    ServerAliveCountMax 4"
-      echo "$MARK_END"
-      echo
-      awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0 == b {skip = 1; next} $0 == e {skip = 0; if ((getline line) > 0 && line != "") print line; next} !skip' "$cfg"
-    } >"$tmp"
-    cat "$tmp" >"$cfg"; rm -f "$tmp"
-    echo "   Added 'Host $HOST_ALIAS' to ~/.ssh/config"
+    write_ssh_block
+    echo "   Added 'Host $HOST_ALIAS' to ~/.ssh/config, with a wake step so plain ssh and scp wake it too"
   fi
+}
+
+# This project's block in ~/.ssh/config, between the markers. Replaces an older one.
+write_ssh_block() {
+  local cfg="$HOME/.ssh/config" tmp wake="$HOME/.local/bin/steam-wake"
+  mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+  touch "$cfg"; chmod 600 "$cfg"
+  tmp=$(mktemp)
+  # Our block goes first: ssh uses the first value it finds for each setting.
+  {
+    echo "$MARK_BEGIN"
+    echo "# Written by steam-remote-setup; it replaces this block when re-run."
+    echo "Host $HOST_ALIAS"
+    echo "    HostName $MACHINE_IP"
+    echo "    HostKeyAlias $HOST_ALIAS"
+    echo "    User $MACHINE_USER"
+    echo "    IdentityFile ${KEY_FILE/#$HOME/\~}"
+    echo "    IdentitiesOnly yes"
+    echo "    ServerAliveInterval 15"
+    echo "    ServerAliveCountMax 4"
+    echo "# Wake the Steam Machine (Wake-on-LAN) before plain ssh or scp connects, if it's asleep."
+    echo "# steam-wake only prints to the terminal; this block never changes any settings."
+    echo "Match originalhost $HOST_ALIAS exec \"test -x '$wake' && '$wake' --ssh\""
+    echo "# Back to settings for every host, for whatever follows in this file."
+    echo "Host *"
+    echo "$MARK_END"
+    echo
+    awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0 == b {skip = 1; next} $0 == e {skip = 0; if ((getline line) > 0 && line != "") print line; next} !skip' "$cfg"
+  } >"$tmp"
+  cat "$tmp" >"$cfg"; rm -f "$tmp"
 }
 
 # --------------------------------------------------------------------- Steam Machine
@@ -531,6 +543,14 @@ case "${1:-}" in
     fi ;;
   quality)          load_config; quality_wizard ;;
   auth)             load_config; auth_wizard ;;
+  ssh-config)
+    load_config
+    if ssh_block_exists_outside_marks; then
+      warn "$HOME/.ssh/config has its own 'Host $HOST_ALIAS' entry, so it's left as it is. To have ssh wake the"
+      warn "Steam Machine, add this line after that entry: Match originalhost $HOST_ALIAS exec \"'$HOME/.local/bin/steam-wake' --ssh\""
+    else
+      write_ssh_block; say "Updated this project's block in ~/.ssh/config (plain ssh and scp now wake the Steam Machine)"
+    fi ;;
   check)            load_config; ensure_awake quiet; ssh -o HostName="$TARGET" "$HOST_ALIAS" "$SR_SERVER" --check ;;
   update-server)    update_server ;;
   add-client)       shift; add_client "$@" ;;

@@ -270,7 +270,7 @@ It shows the stream settings that Connect hands to Moonlight on every connection
 
 It creates an SSH key at `%USERPROFILE%\.ssh\steam-machine_ed25519` and asks for a **passphrase**. Choose a good one and save it in your password manager: logins need this passphrase **and** the Steam Machine's password. If you already have a key there, it's reused.
 
-It also adds a `Host steam-machine` block to the top of `%USERPROFILE%\.ssh\config`, between `# >>> steam-machine-remote >>>` markers. This is what makes `ssh steam-machine` work. Its `HostKeyAlias` line lets SSH recognise the Steam Machine at either its home or its VPN address. If you already had your own `Host steam-machine` entry, it's left alone and the setup tells you what it should contain.
+It also adds a `Host steam-machine` block to the top of `%USERPROFILE%\.ssh\config`, between `# >>> steam-machine-remote >>>` markers. This is what makes `ssh steam-machine` work. Its `HostKeyAlias` line lets SSH recognise the Steam Machine at either its home or its VPN address. Plain `ssh` doesn't wake the Steam Machine on Windows; `steam-ssh.ps1` does. If you already had your own `Host steam-machine` entry, it's left alone and the setup tells you what it should contain.
 
 ### Steps 5 and 6: First connection
 

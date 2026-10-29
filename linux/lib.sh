@@ -13,6 +13,9 @@ SR_KIT="/home/.steam-remote"                     # on the Steam Machine
 SR_SERVER="$SR_KIT/steam-remote-server.sh"       # on the Steam Machine
 SR_SUN_UNIT="steam-remote-sunshine.service"      # on the Steam Machine
 SR_MOONLIGHT_FLATPAK="com.moonlight_stream.Moonlight"
+# These commands wake the Steam Machine themselves, so the wake step in ~/.ssh/config
+# (steam-wake --ssh) skips the ssh connections they make.
+export STEAM_REMOTE_NOWAKE=1
 
 # Defaults (the config file overrides these).
 MACHINE_IP=""
