@@ -1,10 +1,8 @@
 # shellcheck shell=bash disable=SC2034  # variables are used by the scripts that source this
-# lib.sh: shared code for the Steam Machine Remote Access commands on Linux and macOS.
-# Written for bash 3.2 (macOS's built-in bash) and later.
+# lib.sh: shared code for the Steam Machine Remote Access Linux commands.
 # Sourced by steam-connect, steam-ssh and steam-remote-setup; not run on its own.
 
-SR_VERSION="1.1.0"
-SR_OS=$(uname -s)   # Linux or Darwin (macOS)
+SR_VERSION="1.0.1"
 SR_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/steam-remote"
 SR_CONFIG="$SR_CONFIG_DIR/config"
 SR_MAC_CACHE="$SR_CONFIG_DIR/mac"
@@ -79,10 +77,7 @@ load_config() {
   CTL="$HOME/.ssh/cm-$HOST_ALIAS"   # the shared login's socket
 }
 
-port_open() {   # PORT: does it accept a connection within ~2 seconds?
-  if command -v timeout >/dev/null 2>&1; then timeout 2 bash -c "</dev/tcp/$TARGET/$1" 2>/dev/null
-  else nc -z -G 2 "$TARGET" "$1" >/dev/null 2>&1; fi   # macOS: no timeout command, but nc has -G
-}
+port_open() { timeout 2 bash -c "</dev/tcp/$TARGET/$1" 2>/dev/null; }
 wait_port() {   # PORT SECONDS: wait until the port answers
   local end=$((SECONDS + $2))
   until port_open "$1"; do
@@ -90,23 +85,13 @@ wait_port() {   # PORT SECONDS: wait until the port answers
     sleep 1
   done
 }
-ping_ok() {
-  if [ "$SR_OS" = Darwin ]; then ping -c 1 -t 2 "$1" >/dev/null 2>&1   # macOS: -t = timeout in seconds
-  else ping -c 1 -W 2 "$1" >/dev/null 2>&1; fi
-}
+ping_ok()   { ping -c 1 -W 2 "$1" >/dev/null 2>&1; }
 is_awake()  { ping_ok "$TARGET"; }
 # Is the Steam Machine on a network this PC is directly plugged into (not through a VPN)?
 # Wake-on-LAN only works then. Ethernet, Wi-Fi and bridges are type 1 (ARPHRD_ETHER);
 # VPN interfaces (wg0, tailscale0, tun0...) are not.
 on_home_network() {
   local route dev
-  if [ "$SR_OS" = Darwin ]; then
-    # macOS: on the home network the route has no gateway and uses a physical port (en*).
-    route=$(route -n get "$MACHINE_IP" 2>/dev/null) || return 1
-    grep -q 'flags:.*GATEWAY' <<<"$route" && return 1
-    dev=$(awk '$1 == "interface:" {print $2; exit}' <<<"$route")
-    case "$dev" in en*|bridge*) return 0 ;; *) return 1 ;; esac
-  fi
   route=$(ip -o route get "$MACHINE_IP" 2>/dev/null) || return 1
   case "$route" in *" via "*) return 1 ;; esac
   dev=$(sed -n 's/.* dev \([^ ]*\).*/\1/p' <<<"$route")
@@ -181,25 +166,15 @@ ensure_awake() {
 learn_mac() {
   local mac
   [ "$TARGET" = "$MACHINE_IP" ] && on_home_network || return 0
-  if [ "$SR_OS" = Darwin ]; then
-    # macOS: "? (192.168.0.50) at 4:d9:f5:1:2:3 on en0 ...": pad each part to two digits.
-    mac=$(arp -n "$MACHINE_IP" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "at") { print $(i + 1); exit }}' \
-          | awk -F: 'NF == 6 {for (i = 1; i <= 6; i++) printf "%s%02s", (i > 1 ? ":" : ""), $i; print ""}' | tr ' ' 0 | tr 'A-F' 'a-f')
-  else
-    mac=$(ip neigh show "$MACHINE_IP" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "lladdr") { print $(i + 1); exit }}')
-  fi
+  mac=$(ip neigh show "$MACHINE_IP" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "lladdr") { print $(i + 1); exit }}')
   if valid_mac "$mac" && [ "$mac" != "$(cat "$SR_MAC_CACHE" 2>/dev/null)" ]; then
     mkdir -p "$SR_CONFIG_DIR"
     (umask 077; printf '%s\n' "$mac" >"$SR_MAC_CACHE")
   fi
 }
 
-# Moonlight: the macOS app, the Flatpak, or a native moonlight / moonlight-qt.
+# Moonlight: the Flatpak if installed, otherwise a native moonlight / moonlight-qt.
 moonlight_cmd() {
-  local app
-  for app in /Applications/Moonlight.app "$HOME/Applications/Moonlight.app"; do
-    if [ -x "$app/Contents/MacOS/Moonlight" ]; then echo "$app/Contents/MacOS/Moonlight"; return; fi
-  done
   if command -v flatpak >/dev/null 2>&1 && flatpak info "$SR_MOONLIGHT_FLATPAK" >/dev/null 2>&1; then
     echo "flatpak run $SR_MOONLIGHT_FLATPAK"
   elif command -v moonlight >/dev/null 2>&1; then echo moonlight
@@ -210,42 +185,7 @@ moonlight_kill() {
   flatpak kill "$SR_MOONLIGHT_FLATPAK" >/dev/null 2>&1
   pkill -x moonlight >/dev/null 2>&1
   pkill -x moonlight-qt >/dev/null 2>&1
-  pkill -x Moonlight >/dev/null 2>&1   # macOS
   return 0
-}
-
-# Run a command in its own session, detached from this terminal (Linux: setsid;
-# macOS has no setsid command, so python does the same system call).
-detach() {
-  if command -v setsid >/dev/null 2>&1; then setsid "$@"
-  else python3 -I -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"; fi
-}
-
-# The full path of a file (macOS before 12.3 has no readlink -f).
-real_path() {
-  readlink -f "$1" 2>/dev/null || python3 -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
-}
-
-# PIDs of ssh processes whose command line mentions any of the given words.
-ssh_pids() {
-  local w args=()
-  for w in "$@"; do [ -n "$w" ] && args+=(-e "$w"); done
-  ps -axo pid=,command= | awk '{c = $2; sub(".*/", "", c); if (c == "ssh") print}' | grep -F "${args[@]}" | awk '{print $1}' | xargs
-}
-
-# Only one steam-connect at a time: flock on Linux, a lock folder elsewhere.
-take_lock() {   # LOCKFILE
-  if command -v flock >/dev/null 2>&1; then
-    exec 9>"$1"; flock -n 9; return
-  fi
-  local dir="$1.d" pid
-  if ! mkdir "$dir" 2>/dev/null; then
-    pid=$(cat "$dir/pid" 2>/dev/null)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then return 1; fi
-    rm -rf "$dir"; mkdir "$dir" 2>/dev/null || return 1
-  fi
-  echo $$ >"$dir/pid"
-  SR_LOCK_DIR=$dir
 }
 
 # Read STREAM_OUTPUT / TV_OUTPUT from the Steam Machine's config (over the shared login)

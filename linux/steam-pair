@@ -22,7 +22,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = "1.1.0"
+VERSION = "1.0.1"
 WAIT_FOR_MOONLIGHT = 120  # seconds to wait for you to click the host in Moonlight
 
 # Sunshine uses a self-signed certificate. The connection only reaches this PC's end
@@ -74,29 +74,13 @@ def check_tunnel():
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
     if not up:
         die("steam-connect isn't connected. Run `steam-connect nostream` in another window first.")
-    port = CONF["WEBUI_PORT"]
-    held_by_other = f"Port {port} is held by another program, not the SSH tunnel. Not sending the password."
-    try:  # Linux
-        out = subprocess.run(["ss", "-Hltnp", f"sport = :{port}"],
-                             capture_output=True, text=True, timeout=5).stdout
-        if out.strip() and '"ssh"' not in out:
-            die(held_by_other)
-        return
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    try:  # macOS: lsof only lists this user's programs, so a listener it can't see is someone else's
-        out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fc"],
-                             capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return  # neither tool available: the login check above will have to do
-    if "cssh" in out.split():
-        return
     try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=2):
-            pass
-    except OSError:
-        return  # nothing listening; the request will simply fail
-    die(held_by_other)
+        out = subprocess.run(["ss", "-Hltnp", f"sport = :{CONF['WEBUI_PORT']}"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return  # ss missing: the login check above will have to do
+    if out.strip() and '"ssh"' not in out:
+        die(f"Port {CONF['WEBUI_PORT']} is held by another program, not the SSH tunnel. Not sending the password.")
 
 
 def call(method, path, auth=None, body=None, timeout=10):

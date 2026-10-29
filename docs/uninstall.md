@@ -50,7 +50,7 @@ sudo systemctl disable --now sshd
 
 Wake-on-LAN stays switched on in NetworkManager, which is harmless. To turn it off: `nmcli connection modify "CONNECTION NAME" 802-3-ethernet.wake-on-lan default`. List connection names with `nmcli connection show`.
 
-## 2. A Linux PC or a Mac
+## 2. A Linux PC
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash -s -- --uninstall
@@ -63,8 +63,7 @@ This removes the commands, launchers and icons. Then, if you like:
 ```sh
 rm -f ~/.ssh/steam-machine_ed25519 ~/.ssh/steam-machine_ed25519.pub   # the SSH key
 ssh-keygen -R STEAM_MACHINE_IP                                        # its known_hosts entry
-flatpak uninstall --user -y --delete-data com.moonlight_stream.Moonlight   # Linux
-brew uninstall --cask moonlight                                            # macOS (or drag Moonlight to the Bin)
+flatpak uninstall --user -y --delete-data com.moonlight_stream.Moonlight
 ```
 
 Finally, delete the block between `# >>> steam-machine-remote >>>` and `# <<< steam-machine-remote <<<` in `~/.ssh/config`.
