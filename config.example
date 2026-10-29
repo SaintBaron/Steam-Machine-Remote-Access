@@ -54,6 +54,22 @@ PERSIST="2h"
 # so the login doesn't time out, and to notice if the connection dropped.
 KEEPALIVE="600"
 
-# Work around Sunshine's Game Mode black-screen bug (Sunshine 2026.906 and later,
-# LizardByte/Sunshine issue #5839). "yes" or "no". Turn it off once a fixed Sunshine ships.
+# The Game Mode capture fix while streaming: Game Mode draws everything onto one layer,
+# so the stream isn't black (a Sunshine 2026.906+ problem, LizardByte/Sunshine #5839),
+# includes Steam's menus, and has the right HDR colours. "yes" or "no"; keep it on.
 BLACK_SCREEN_FIX="yes"
+
+# Stream settings that steam-connect hands to Moonlight (they apply to that stream
+# only). Empty = Moonlight's own setting. Set them with: steam-remote-setup quality
+# See docs/quality.md.
+# Resolution, like 3840x2160 or 2560x1440, and frames per second, like 60 or 120.
+STREAM_RESOLUTION=""
+STREAM_FPS=""
+# Bitrate in Mbps at home (60-150 wired, 30-60 on Wi-Fi), and away from home through
+# the VPN, where your home's upload speed is the limit. Empty away = same as at home.
+STREAM_BITRATE=""
+STREAM_BITRATE_AWAY="20"
+# Video codec: auto, HEVC, AV1 or H.264 (H.264 can't do HDR).
+STREAM_CODEC=""
+# HDR: yes or no. Empty = Moonlight's own "Enable HDR" setting.
+STREAM_HDR=""

@@ -2,7 +2,7 @@
 
 **Do your OS guide first** ([Arch](arch.md), [Debian/Ubuntu](debian.md), [macOS](macos.md) or [Windows](windows.md)), then come back here.
 
-Remote access works through a **VPN**, a private, encrypted link between your PC and your home. Nothing is opened to the internet, and every login still needs your key and password.
+Remote access works through a **VPN**, a private, encrypted link between your PC and your home. Nothing is opened to the internet, and every login still needs your key (and password, unless you chose key-only logins).
 
 > [!IMPORTANT]
 > Wake-on-LAN doesn't work from outside your home, so the Steam Machine must already be **awake** when you connect remotely. Turn off its sleep timer before you leave, or wake it with your router's app if the app has a Wake-on-LAN button.
@@ -88,7 +88,7 @@ Only private addresses are accepted: `10.x.x.x`, `172.16-31.x.x` and `192.168.x.
 
 ## Good to know
 
-- **Bitrate:** home upload speeds are often low. Start Moonlight at 10 to 20 Mbps when away, and raise it until the stream stutters. Moonlight's stats overlay (Ctrl+Alt+Shift+S) shows what you're getting.
+- **Bitrate:** home upload speeds are often low, so `steam-connect` uses a lower bitrate (20 Mbps by default) whenever it connects through the VPN. Change it with `steam-remote-setup quality` (Windows: `steam-remote-setup.ps1 quality`): raise it until the stream stutters. Moonlight's stats overlay (Ctrl+Alt+Shift+S) shows what you're getting. See [quality.md](quality.md).
 - **Moonlight shows the host as locked or unknown when away** (Tailscale): add the Steam Machine's Tailscale address in Moonlight with **+**. You don't need to pair again.
 - **Stalls or black frames over WireGuard:** add `MTU = 1380` under `[Interface]` in the client config.
 - **Turning it off:** run `steam-remote-setup remote` and choose 1 (this PC only), or `steam-remote-setup remote off` (every PC). On Windows, use `steam-remote-setup.ps1`.

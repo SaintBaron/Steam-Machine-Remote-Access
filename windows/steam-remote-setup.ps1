@@ -9,6 +9,8 @@
 #   steam-remote-setup.ps1 remove-client IP              stop allowing a PC
 #   steam-remote-setup.ps1 remote                        choose remote access (outside your home, through a VPN)
 #   steam-remote-setup.ps1 remote off                    turn remote access off for every PC
+#   steam-remote-setup.ps1 quality                       choose the stream's resolution, bitrate, HDR and encoder preset
+#   steam-remote-setup.ps1 auth                          choose what a login needs: key and password, or key only
 #   steam-remote-setup.ps1 uninstall-server              remove everything from the Steam Machine
 param([string]$Command = '', [string]$Ip = '', [string]$KeyPath = '', [switch]$Pause, [switch]$Version)
 
@@ -65,15 +67,28 @@ CLIENT_NAME="$($c.CLIENT_NAME)"
 # Local port for the web UI tunnel: https://localhost:$($c.WEBUI_PORT)
 WEBUI_PORT="$($c.WEBUI_PORT)"
 
-# Work around Sunshine's Game Mode black-screen bug (2026.906+). yes or no.
+# Game Mode capture fix while streaming: avoids a black stream (Sunshine 2026.906+),
+# missing Steam menus and wrong HDR colours. yes or no; keep it on.
 BLACK_SCREEN_FIX="$($c.BLACK_SCREEN_FIX)"
+
+# Stream settings handed to Moonlight by steam-connect. Empty = Moonlight's own setting.
+# Change them with: steam-remote-setup.ps1 quality
+# Resolution, like 3840x2160, and frames per second, like 60 or 120.
+STREAM_RESOLUTION="$($c.STREAM_RESOLUTION)"
+STREAM_FPS="$($c.STREAM_FPS)"
+# Bitrate in Mbps at home, and away from home (through the VPN, where upload is slower).
+STREAM_BITRATE="$($c.STREAM_BITRATE)"
+STREAM_BITRATE_AWAY="$($c.STREAM_BITRATE_AWAY)"
+# Video codec: auto, HEVC, AV1 or H.264. HDR: yes or no.
+STREAM_CODEC="$($c.STREAM_CODEC)"
+STREAM_HDR="$($c.STREAM_HDR)"
 "@
 }
 
 function Invoke-ConfigWizard {
-    Write-SrInfo "Step 1 of 7: this PC's settings ($SrConfig)"
+    Write-SrInfo "Step 1 of 8: this PC's settings ($SrConfig)"
     $c = Read-SrConfigFile $SrConfig
-    if ((Test-SrIp $c.MACHINE_IP) -and (Read-Default "   Steam Machine $($c.MACHINE_USER)@$($c.MACHINE_IP), SSH name '$($c.HOST_ALIAS)'. Keep these? (y/n)" 'y') -match '^[Yy]') { return }
+    if ((Test-SrIp $c.MACHINE_IP) -and (Read-Default "   Steam Machine $($c.MACHINE_USER)@$($c.MACHINE_IP), SSH name '$($c.HOST_ALIAS)'. Keep these? (y/n)" 'y') -match '^[Yy]') { Invoke-OtherSettings $c; return }
     do {
         $c.MACHINE_IP = Read-Default "   The Steam Machine's IP address (see the guide to find it)" $c.MACHINE_IP
         if (-not (Test-SrIp $c.MACHINE_IP)) { Write-Host '   That isn''t an IPv4 address like 192.168.0.50.' }
@@ -84,6 +99,50 @@ function Invoke-ConfigWizard {
     if ($c.HOST_ALIAS -notmatch '^[A-Za-z0-9._-]+$') { Stop-SrError 'Use only letters, numbers, . _ - in the SSH name.' }
     Save-SrConfig $c
     Write-SrInfo "Saved $SrConfig (edit it any time; see the comments inside)"
+    Invoke-OtherSettings $c
+}
+
+# The less common settings, with their defaults. Most people keep them.
+function Invoke-OtherSettings($c) {
+    $app = if ($c.MOONLIGHT_APP) { $c.MOONLIGHT_APP } else { 'Desktop' }
+    $bc = if ($c.BROADCAST) { $c.BROADCAST } else { 'automatic' }
+    $name = if ($c.CLIENT_NAME) { $c.CLIENT_NAME } else { 'this computer''s name' }
+    Write-Host "   Other settings: Moonlight app '$app', Game Mode capture fix $($c.BLACK_SCREEN_FIX),"
+    Write-Host "   wake wait $($c.WAKE_TIMEOUT)s, wake broadcast $bc, name in Sunshine: $name."
+    if ((Read-Default '   Change these? (y/n)' 'n') -notmatch '^[Yy]') { return }
+    do {
+        $v = Read-Default '   Sunshine app Moonlight opens (Desktop streams the whole screen)' $app
+        $ok = $v -match '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$'
+        if (-not $ok) { Write-Host '   Use letters, numbers, spaces, . _ - (up to 40).' }
+    } until ($ok)
+    $c.MOONLIGHT_APP = $v
+    Write-Host '   The capture fix keeps the stream from going black in Game Mode and keeps Steam''s'
+    Write-Host '   menus and HDR colours right. Leave it on unless you know you don''t need it.'
+    do { $v = (Read-Default '   Game Mode capture fix: yes or no' $c.BLACK_SCREEN_FIX).ToLower() } until ($v -match '^(yes|no)$')
+    $c.BLACK_SCREEN_FIX = $v
+    do {
+        $v = Read-Default '   Seconds to wait for it to wake from sleep' $c.WAKE_TIMEOUT
+        $ok = $v -match '^[0-9]{2,3}$'
+        if (-not $ok) { Write-Host '   Type a number of seconds, like 90.' }
+    } until ($ok)
+    $c.WAKE_TIMEOUT = $v
+    Write-Host '   Wake-on-LAN sends to the .255 address of a /24 home network. Set an address only if'
+    Write-Host '   your network is bigger (for example 192.168.255.255 for a /16); type - for automatic.'
+    do {
+        $v = Read-Default '   Wake-on-LAN broadcast address' $(if ($c.BROADCAST) { $c.BROADCAST } else { '-' })
+        if ($v -eq '-') { $v = '' }
+        $ok = (-not $v) -or (Test-SrIp $v)
+        if (-not $ok) { Write-Host '   That isn''t an IPv4 address.' }
+    } until ($ok)
+    $c.BROADCAST = $v
+    do {
+        $v = Read-Default '   This PC''s name in Sunshine''s paired list (- for this computer''s name)' $(if ($c.CLIENT_NAME) { $c.CLIENT_NAME } else { '-' })
+        if ($v -eq '-') { $v = '' }
+        $ok = $v -match '^[A-Za-z0-9._-]{0,40}$'
+        if (-not $ok) { Write-Host '   Use letters, numbers, . _ - (up to 40).' }
+    } until ($ok)
+    $c.CLIENT_NAME = $v
+    Save-SrConfig $c
 }
 
 function Test-OwnHostBlock {
@@ -97,8 +156,15 @@ function Test-OwnHostBlock {
     $false
 }
 
+function Test-KeyHasPassphrase {
+    # An empty argument reaches ssh-keygen as '""' in Windows PowerShell 5.1, but as '' in PowerShell 7.3+.
+    $empty = if ($PSVersionTable.PSVersion -ge [version]'7.3') { '' } else { '""' }
+    & ssh-keygen.exe -y -P $empty -f $Cfg.KEY_FILE *> $null
+    $LASTEXITCODE -ne 0
+}
+
 function Invoke-SshSetup {
-    Write-SrInfo 'Step 3 of 7: SSH key and SSH config'
+    Write-SrInfo 'Step 4 of 8: SSH key and SSH config'
     New-Item -ItemType Directory -Force -Path $SshDir | Out-Null
     $own = Test-OwnHostBlock
     if ($own) {
@@ -111,10 +177,7 @@ function Invoke-SshSetup {
         & ssh-keygen.exe -t ed25519 -f $Cfg.KEY_FILE -C "steam-remote@$env:COMPUTERNAME"
         if ($LASTEXITCODE -ne 0) { Stop-SrError 'ssh-keygen failed.' }
     } else { Write-Host "   Using the existing key $($Cfg.KEY_FILE)" }
-    # An empty argument reaches ssh-keygen as '""' in Windows PowerShell 5.1, but as '' in PowerShell 7.3+.
-    $empty = if ($PSVersionTable.PSVersion -ge [version]'7.3') { '' } else { '""' }
-    & ssh-keygen.exe -y -P $empty -f $Cfg.KEY_FILE *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if (-not (Test-KeyHasPassphrase)) {
         Write-SrWarn "$($Cfg.KEY_FILE) has no passphrase, so anyone who copies that file only needs the password."
         Write-Host "   Add one now with: ssh-keygen -p -f `"$($Cfg.KEY_FILE)`""
     }
@@ -144,14 +207,14 @@ function Invoke-SshSetup {
 }
 
 function Invoke-ServerSetup {
-    Write-SrInfo 'Step 4 of 7: reach the Steam Machine'
+    Write-SrInfo 'Step 5 of 8: reach the Steam Machine'
     if (-not (Find-SrTarget)) { Stop-SrError "No reply from $($Cfg.MACHINE_IP). Check it's on, awake and wired, and that SSH is on (Part 2 of the guide)." }
     if ($Cfg.TARGET -ne $Cfg.MACHINE_IP) { Write-SrInfo "Using its VPN address, $($Cfg.TARGET)" }
     if (-not (Test-SrPort 22)) { Stop-SrError "$($Cfg.TARGET) answers but SSH doesn't. At the Steam Machine run: sudo systemctl enable --now sshd" }
     Save-SrMac
     $hostOpt = "HostName=$($Cfg.TARGET)"
 
-    Write-SrInfo 'Step 5 of 7: copy the setup to the Steam Machine'
+    Write-SrInfo 'Step 6 of 8: copy the setup to the Steam Machine'
     & ssh-keygen.exe -F $Cfg.HOST_ALIAS *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Host '   First connection: SSH shows the Steam Machine''s fingerprint (SHA256:...) and asks'
@@ -169,7 +232,7 @@ function Invoke-ServerSetup {
         if ($LASTEXITCODE -ne 0) { Stop-SrError "Couldn't copy the files. Check the password, and that this PC's IP hasn't changed." }
     } finally { Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue }
 
-    Write-SrInfo 'Step 6 of 7: set up the Steam Machine'
+    Write-SrInfo 'Step 7 of 8: set up the Steam Machine'
     Write-Host "   Log in again, then sudo asks for the $($Cfg.MACHINE_USER) password once more."
     # ${SSH_CLIENT%% *} expands on the Steam Machine: the IP it sees for this PC.
     # Through a VPN, the address it sees is the VPN one, which is added as a remote address instead.
@@ -179,9 +242,13 @@ function Invoke-ServerSetup {
     & ssh.exe -t -o $hostOpt $Cfg.HOST_ALIAS $cmd
     if ($LASTEXITCODE -ne 0) { Stop-SrError "The Steam Machine setup didn't finish. Read its messages above; it's safe to run the setup again." }
 
-    Write-SrInfo 'Step 7 of 7: check a fresh login needs your key AND the password'
-    & ssh.exe -o $hostOpt $Cfg.HOST_ALIAS 'echo "   key and password accepted"'
-    if ($LASTEXITCODE -ne 0) { Stop-SrError 'That login failed. See docs/troubleshooting.md (Login problems).' }
+    Write-SrInfo 'Step 8 of 8: check a fresh login works the new way'
+    $out = @(& ssh.exe -o $hostOpt $Cfg.HOST_ALIAS "echo accepted; $SrServer --auth-mode")
+    if ($LASTEXITCODE -ne 0 -or $out[0] -ne 'accepted') { Stop-SrError 'That login failed. See docs/troubleshooting.md (Login problems).' }
+    if ($out[-1] -eq 'key') {
+        Write-Host '   key accepted (logins need your SSH key only)'
+        if (-not (Test-KeyHasPassphrase)) { Write-SrWarn "Your key has no passphrase, so anyone who copies $($Cfg.KEY_FILE) can log in. Add one: ssh-keygen -p -f `"$($Cfg.KEY_FILE)`"" }
+    } else { Write-Host '   key and password accepted' }
     Write-SrInfo 'Setup complete.'
     Write-Host @'
 
@@ -215,7 +282,7 @@ function Invoke-RemoteWizard {
     $c = Read-SrConfigFile $SrConfig
     $oldPc = if (Test-SrIp $c.REMOTE_PC_IP) { $c.REMOTE_PC_IP } else { '' }
     $current = switch ($c.REMOTE_MODE) { 'router' { '2' } 'tailscale' { '3' } 'other' { '4' } default { '1' } }
-    Write-SrInfo 'Step 2 of 7: remote access (optional)'
+    Write-SrInfo 'Step 2 of 8: remote access (optional)'
     Write-Host '   By default only your home network can connect. You can also let this PC connect'
     Write-Host '   from elsewhere, through a VPN. Nothing is ever opened to the internet directly.'
     Write-Host '   How each option works and how to set it up: docs/remote-access.md'
@@ -270,6 +337,92 @@ function Get-RemoteArgs {
     $a
 }
 
+# ------------------------------------------------------------------ stream quality
+function Read-StreamSetting($c, [string]$Name, [string]$Prompt) {
+    $old = $c[$Name]
+    while ($true) {
+        $v = Read-Host "$Prompt [$old]"
+        if (-not $v) { $v = $old }
+        if ($v -eq '-') { $v = '' }
+        $c[$Name] = $v
+        $problem = Test-SrStreamSettings $c
+        if (-not $problem) { return }
+        Write-Host "   $problem"
+        $c[$Name] = $old
+    }
+}
+# The first-time setup's stream quality step: show the current settings, offer to change them.
+function Invoke-SetupQualityStep {
+    $c = Read-SrConfigFile $SrConfig
+    if (Test-SrStreamSettings $c) { foreach ($k in 'STREAM_RESOLUTION','STREAM_FPS','STREAM_BITRATE','STREAM_BITRATE_AWAY','STREAM_CODEC','STREAM_HDR') { $c[$k] = '' } }
+    $ml = "Moonlight's setting"
+    function Format-Setting($v) { if ($v) { $v } else { $ml } }
+    Write-SrInfo 'Step 3 of 8: stream quality (optional)'
+    Write-Host '   Connect can hand Moonlight a resolution, frame rate, bitrate, codec and HDR choice on'
+    Write-Host '   every connection, with a lower bitrate when you''re away from home. Now:'
+    Write-Host "     Resolution: $(Format-Setting $c.STREAM_RESOLUTION)   Frame rate: $(Format-Setting $c.STREAM_FPS)"
+    $home_ = if ($c.STREAM_BITRATE) { "$($c.STREAM_BITRATE) Mbps" } else { $ml }
+    $away = if ($c.STREAM_BITRATE_AWAY) { "$($c.STREAM_BITRATE_AWAY) Mbps" } else { 'same as at home' }
+    if ($c.REMOTE_MODE -eq 'off') { Write-Host "     Bitrate: $home_" } else { Write-Host "     Bitrate at home: $home_   Away (through the VPN): $away" }
+    Write-Host "     Codec: $(Format-Setting $c.STREAM_CODEC)   HDR: $(Format-Setting $c.STREAM_HDR)"
+    Write-Host '   You can change these any time with: steam-remote-setup.ps1 quality (docs/quality.md).'
+    if ((Read-Default '   Change them now? (y/n)' 'n') -match '^[Yy]') { Invoke-QualityWizard -Setup }
+}
+
+function Invoke-QualityWizard([switch]$Setup) {
+    $c = Read-SrConfigFile $SrConfig
+    if (Test-SrStreamSettings $c) { foreach ($k in 'STREAM_RESOLUTION','STREAM_FPS','STREAM_BITRATE','STREAM_BITRATE_AWAY','STREAM_CODEC','STREAM_HDR') { $c[$k] = '' } }
+    Write-SrInfo 'Stream quality (Enter keeps the value in brackets; type - to clear it)'
+    Write-Host '   These are handed to Moonlight each time steam-connect starts it. Empty means Moonlight''s'
+    Write-Host '   own setting (its Settings page). For the sharpest picture, match this PC''s screen.'
+    Write-Host '   docs/quality.md explains each one.'
+    Read-StreamSetting $c 'STREAM_RESOLUTION' '   Resolution, like 3840x2160 or 2560x1440'
+    Read-StreamSetting $c 'STREAM_FPS' '   Frames per second, like 60 or 120'
+    Write-Host '   Bitrate: 60 to 150 Mbps suits a wired home network; Wi-Fi often manages 30 to 60.'
+    Read-StreamSetting $c 'STREAM_BITRATE' '   Bitrate at home, in Mbps'
+    if ($c.REMOTE_MODE -ne 'off') {
+        Write-Host '   Away from home the stream goes through your home''s upload. 10 to 25 Mbps is typical.'
+        Read-StreamSetting $c 'STREAM_BITRATE_AWAY' '   Bitrate away from home, in Mbps'
+    }
+    Write-Host '   Codec: HEVC works almost everywhere. AV1 is sharper at the same bitrate, if this PC''s'
+    Write-Host '   graphics can decode it. auto lets Moonlight choose.'
+    Read-StreamSetting $c 'STREAM_CODEC' '   Codec: auto, HEVC, AV1 or H.264'
+    Write-Host '   HDR needs an HDR-capable dummy plug, HDR on in Game Mode, and HDR on for this PC''s'
+    Write-Host '   screen. With yes, Moonlight asks for HDR (it shows SDR if the Steam Machine can''t).'
+    Read-StreamSetting $c 'STREAM_HDR' '   HDR: yes or no'
+    Save-SrConfig $c
+    Write-SrInfo 'Saved. Connect uses these from the next connection.'
+    if ($Setup) { Write-Host '   (The Steam Machine''s encoder preset is one of its options in step 7.)'; return }
+    Write-Host ''
+    Write-Host '   The Steam Machine''s encoder preset sets how hard its video encoder works: quality'
+    Write-Host '   (sharpest; the default), balanced (for 4K at 120 FPS, or if the stream lags), speed'
+    Write-Host '   (lowest delay) or auto (the graphics driver''s default).'
+    while ($true) {
+        $preset = Read-Host '   Encoder preset (Enter to leave it as it is)'
+        if ($preset -match '^(quality|balanced|speed|auto|)$') { break }
+        Write-Host '   Type quality, balanced, speed or auto, or press Enter.'
+    }
+    if ($preset) { Invoke-RemoteSudo "--set-encoder $($preset.ToLower())" }
+}
+
+# ------------------------------------------------------------------ login mode
+function Invoke-AuthWizard {
+    Import-SrConfig
+    Write-SrInfo 'What an SSH login to the Steam Machine needs'
+    Write-Host "     1) Your SSH key AND the $($Cfg.MACHINE_USER) password (default, most secure)"
+    Write-Host '        A copied key file is useless on its own.'
+    Write-Host '     2) Your SSH key only'
+    Write-Host '        One passphrase to type, or none once Windows remembers it (ssh-add). Fine at home,'
+    Write-Host '        IF the key has a strong passphrase: someone who copies the key file can try'
+    Write-Host '        passphrases as fast as their computer allows.'
+    Write-Host "   sudo always needs the $($Cfg.MACHINE_USER) password. More in docs/security.md."
+    do { $choice = Read-Default '   Choose 1 or 2' '1' } until ($choice -match '^[12]$')
+    if ($choice -eq '2') {
+        if (-not (Test-KeyHasPassphrase)) { Stop-SrError "$($Cfg.KEY_FILE) has no passphrase, so key-only logins would let anyone who copies it in. Add one first: ssh-keygen -p -f `"$($Cfg.KEY_FILE)`"" }
+        Invoke-RemoteSudo '--set-auth key'
+    } else { Invoke-RemoteSudo '--set-auth key+password' }
+}
+
 Test-SrSsh
 switch ($Command) {
     '' {
@@ -277,6 +430,7 @@ switch ($Command) {
         if (-not (Get-SrMoonlight)) { Write-SrWarn "Moonlight isn't installed yet. You'll need it to stream (see the guide)." }
         Invoke-ConfigWizard
         Invoke-RemoteWizard
+        Invoke-SetupQualityStep
         Import-SrConfig
         Invoke-SshSetup
         Invoke-ServerSetup
@@ -295,6 +449,8 @@ switch ($Command) {
             if ($ra) { Invoke-RemoteSudo $ra.Trim() } else { Write-SrInfo 'Nothing to change on the Steam Machine.' }
         }
     }
+    'quality' { Invoke-QualityWizard }
+    'auth' { Invoke-AuthWizard }
     'check' { Import-SrConfig; Wait-SrAwake -Quiet; & ssh.exe -o "HostName=$($Cfg.TARGET)" $Cfg.HOST_ALIAS "$SrServer --check" }
     'update-server' {
         Import-SrConfig
@@ -322,6 +478,6 @@ switch ($Command) {
         Write-Host 'This removes everything from the Steam Machine, uninstalls Sunshine and turns SSH off.'
         if ((Read-Default 'Continue? (y/n)' 'n') -match '^[Yy]') { Invoke-RemoteSudo '--uninstall' }
     }
-    default { Stop-SrError "Unknown command '$Command'. Commands: displays, remote, check, update-server, add-client, remove-client, uninstall-server" }
+    default { Stop-SrError "Unknown command '$Command'. Commands: displays, remote, quality, auth, check, update-server, add-client, remove-client, uninstall-server" }
 }
 if ($env:STEAM_REMOTE_PAUSE) { Read-Host 'Press Enter to close this window' | Out-Null }

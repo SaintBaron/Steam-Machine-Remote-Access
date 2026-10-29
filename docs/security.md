@@ -5,7 +5,7 @@ What this project protects against, how, and the trade-offs it makes.
 ## Goals
 
 - Only **your PC(s)** can log in to the Steam Machine or stream from it.
-- Every login needs **two things**: your SSH key (protected by its passphrase) **and** the Steam Machine's password.
+- By default, every login needs **two things**: your SSH key (protected by its passphrase) **and** the Steam Machine's password. You can choose key-only logins instead (see [Key-only logins](#key-only-logins)).
 - Sunshine runs **only while you're using it**, streams only to **paired** devices, and always **encrypts**.
 - Nothing is reachable **from the internet**.
 - The setup **survives SteamOS updates** without leaving gaps.
@@ -63,7 +63,7 @@ ClientAliveInterval 30
 ClientAliveCountMax 4
 ```
 
-- `AuthenticationMethods publickey,password` means a stolen key alone isn't enough, and a guessed password alone isn't enough.
+- `AuthenticationMethods publickey,password` means a stolen key alone isn't enough, and a guessed password alone isn't enough. With key-only logins it's `AuthenticationMethods publickey` and `PasswordAuthentication no` instead; everything else stays the same.
 - SteamOS locks the account for 10 minutes after 3 wrong passwords (pam_faillock), which slows guessing.
 - `AllowUsers` repeats the IP restriction inside SSH itself.
 - Port forwarding is limited to the one tunnel the scripts use (to the web UI). A login can't be used to reach anything else through the Steam Machine, and agent forwarding is off. If you want your own tunnels, add a `PermitOpen` line in a separate file such as `/etc/ssh/sshd_config.d/20-my-tunnels.conf`. Files are read in name order and the first value wins, so put the line in a file that sorts *before* `10-steam-remote.conf` if you want it to replace the default, e.g. `05-my-tunnels.conf`.
@@ -99,6 +99,8 @@ The worst case if someone abuses these, from an already-logged-in session: they 
 
 Sunshine captures the screen with KMS, which needs `CAP_SYS_ADMIN`. Running the Flatpak as root keeps that capability, and Flatpak's sandbox still applies. To keep it inside the sandbox, the service uses a **setuid copy of bubblewrap** (`/var/lib/sunshine-bwrap/bwrap`) in a folder only root can enter (`0700`). It's recreated from SteamOS's own `/usr/bin/bwrap` every time Sunshine starts, so it stays up to date. Other users can't run it.
 
+The Game Mode capture fix, the stream check and the SDR/HDR report don't need root: they read and set properties on Game Mode's display as your user. When Sunshine stops, its service undoes the capture fix by running the server script as your user (`runuser`), not as root.
+
 ### The shared login (Linux)
 
 `steam-connect` keeps one SSH login open and shares it through a socket at `~/.ssh/cm-steam-machine`. While it's open, any program running as **your user** on the PC can use it without credentials. That's no worse than what such a program could already do (read your keystrokes, for example). Other users can't reach it: `~/.ssh` is private. The login closes when you disconnect, and on its own after `PERSIST` (2 hours) unused if `steam-connect` is killed. Windows doesn't share logins.
@@ -120,6 +122,24 @@ While `steam-connect` is open, Sunshine's web UI is reachable at `localhost:4799
 ### The SSH key passphrase
 
 The setup can't force a passphrase, but it warns if the key has none, because then anyone who copies the key file only needs the password. Add one any time with `ssh-keygen -p -f ~/.ssh/steam-machine_ed25519`.
+
+### Key-only logins
+
+`AUTH_MODE="key"` in the Steam Machine's config makes SSH accept your key alone, without the Steam Machine's password. Choose it during setup (one of the Steam Machine's options), or later:
+
+| Linux or macOS | Windows |
+| --- | --- |
+| `steam-remote-setup auth` | `steam-remote-setup.ps1 auth` |
+
+It refuses if your key has no passphrase, and the setup warns again if one is removed later.
+
+**What stays the same:** the firewall (only your PC's address reaches SSH), `AllowUsers`, no root logins, the forwarding limits, and `sudo` still asking for the password. There's no password to guess over the network any more, because password logins are off.
+
+**What you give up:** protection if the key file is copied (a stolen laptop, a leaked backup). With key and password, the thief also needs the Steam Machine's password, which is checked on the Steam Machine and locks after 3 wrong tries. With key only, they can try passphrases offline as fast as they like, so the passphrase is all that stands in the way. Use a long one: four or five random words.
+
+It makes no difference against malware already on your PC: it can use a remembered key, or record the password as you type it.
+
+Key-only is reasonable for a PC that stays at home. Keep the default for a laptop that travels, or if you use remote access. Anything other than exactly `key` in the config means key and password, so a mistyped value never loosens the login.
 
 ### Sunshine and the audio socket
 
@@ -143,6 +163,8 @@ Only **magic packet** wake is enabled (`wake-on-lan magic`), not "wake on any tr
 
 `steam-remote-heal.service` runs `/home/.steam-remote/steam-remote-server.sh --apply` as root at every boot. The script, its folder and its config are owned by root and not writable by `deck`, so a compromised `deck` account can't change what runs as root. If you add files to `/home/.steam-remote` yourself, keep them root-owned.
 
+It rebuilds everything from that config, so it follows your choices: the login mode (`AUTH_MODE`), allowed and remote addresses, display outputs, idle timer, Wake-on-LAN, the Sunshine settings it manages (including the encoder preset), and the Sunshine service, including the step that undoes the Game Mode capture fix when Sunshine stops.
+
 The heal service also restores Sunshine's pairing and web UI login from its backup if they disappear. That means deleting Sunshine's files is **not** a way to reset them. To unpair a device, use the web UI's paired-devices list. To reset everything, delete the backup too:
 
 ```bash
@@ -154,7 +176,7 @@ sudo rm -rf /home/.steam-remote/sunshine-backup /root/.var/app/dev.lizardbyte.ap
 Since SteamOS 3.6, an update discards every change in `/etc` except the paths on SteamOS's keep list. The list includes systemd `.service` files, `.service.d` drop-ins and enable links, but not SSH config drop-ins, sudo rules or firewall files. So without help, an update would leave SSH switched on but without its lockdown: password-only logins from your network. Three layers stop that from happening:
 
 1. **The protections stay put.** The setup adds its files to SteamOS's keep list, through `/etc/atomic-update.conf.d/steam-remote.conf`. This is SteamOS's own mechanism for keeping files through updates.
-2. **SSH refuses to start without them.** A drop-in for SteamOS's SSH service (`/etc/systemd/system/sshd.service.d/10-steam-remote.conf`, kept by SteamOS's default list) makes SSH require the firewall. Before every start, it also checks that SSH's real, effective settings demand key **and** password from an allowed address. If anything is missing (the lockdown file, the line that loads it, or the firewall), SSH stays **off** rather than falling back to SteamOS's defaults.
+2. **SSH refuses to start without them.** A drop-in for SteamOS's SSH service (`/etc/systemd/system/sshd.service.d/10-steam-remote.conf`, kept by SteamOS's default list) makes SSH require the firewall. Before every start, it also checks that SSH's real, effective settings demand your key (and the password, unless you chose [key-only logins](#key-only-logins)) from an allowed address. If anything is missing (the lockdown file, the line that loads it, or the firewall), SSH stays **off** rather than falling back to SteamOS's defaults.
 3. **Anything lost is put back.** The heal service (kept by SteamOS's default list) runs at every boot, before SSH, and restores anything that's missing. `steam-connect` also checks on every connect.
 
 If `/home/.steam-remote/config` is missing or invalid, the heal service doesn't loosen anything: SSH stays closed until the config is fixed at the Steam Machine's keyboard.

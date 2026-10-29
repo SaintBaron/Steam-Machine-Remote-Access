@@ -3,7 +3,7 @@
 # https://github.com/SaintBaron/Steam-Machine-Remote-Access
 #
 # Installs and maintains everything on the Steam Machine (SteamOS):
-#   SSH lockdown    only your PC(s), only key + password, no root
+#   SSH lockdown    only your PC(s), key + password (or key only, if chosen), no root
 #   Firewall        SSH and Sunshine reachable from your PC(s) only
 #   Sunshine        on-demand (never at boot), KMS capture, encryption required
 #   Sudo rule       lets the client scripts start/stop Sunshine and switch displays
@@ -27,15 +27,24 @@
 #   steam-remote-server.sh --remote-add ADDRESS     allow a PC's VPN address (remote access)
 #   steam-remote-server.sh --remote-remove ADDRESS  stop allowing a VPN address
 #   steam-remote-server.sh --set-remote "ADDRESSES" | off   replace the whole remote list (off = home only)
+#   steam-remote-server.sh --set-encoder quality|balanced|speed|auto   the video encoder's preset
+#   steam-remote-server.sh --set-auth key+password|key   what an SSH login needs
 #   steam-remote-server.sh --uninstall [--keep-sunshine] [--keep-ssh]
 #   steam-remote-server.sh --version
+# No sudo needed (the client scripts use these):
+#   --auth-mode          print what an SSH login needs: key+password or key
+#   --stream-info [sdr|hdr]  what the stream can do now: dummy plug, HDR, encoder (sdr/hdr:
+#                        what this PC asks Moonlight for, so the HDR hint fits)
+#   --stream-watch [S] [sdr]   wait up to S seconds for Moonlight to connect; report SDR or HDR
+#                              ("sdr": SDR was chosen on purpose, so no HDR hints)
+#   --composite on|off   make Game Mode draw onto one layer while streaming, then undo it
 # Used by the systemd units it installs:
 #   --boot-display   --idle-check   --backup-sunshine
 
 set -u
 umask 022
 
-VERSION="1.0.1"
+VERSION="1.2.0"
 R="${STEAM_REMOTE_TEST_ROOT:-}"   # test prefix only; leave unset for real use
 
 KIT_REAL="/home/.steam-remote"
@@ -69,6 +78,8 @@ TV_OUTPUT=""
 IDLE_MINUTES="60"
 SUNSHINE_NAME="steam-machine"
 WAKE_ON_LAN="yes"
+ENCODER_QUALITY="quality"
+AUTH_MODE="key+password"
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 log()  { echo "steam-remote: $*"; }
@@ -109,9 +120,13 @@ load_config() {
     [[ "$line" =~ ^([A-Z_]+)=(\"([^\"]*)\"|([^[:space:]#\"]*))[[:space:]]*(#.*)?$ ]] || continue
     key=${BASH_REMATCH[1]}; val=${BASH_REMATCH[3]}${BASH_REMATCH[4]}
     case "$key" in
-      USER_NAME|ALLOWED_IPS|REMOTE_IPS|STREAM_OUTPUT|TV_OUTPUT|IDLE_MINUTES|SUNSHINE_NAME|WAKE_ON_LAN) printf -v "$key" '%s' "$val" ;;
+      USER_NAME|ALLOWED_IPS|REMOTE_IPS|STREAM_OUTPUT|TV_OUTPUT|IDLE_MINUTES|SUNSHINE_NAME|WAKE_ON_LAN|ENCODER_QUALITY|AUTH_MODE) printf -v "$key" '%s' "$val" ;;
     esac
   done <"$CONFIG"
+  # A mistyped preset isn't worth locking anyone out over: use the default.
+  [[ "$ENCODER_QUALITY" =~ ^(quality|balanced|speed|auto)$ ]] || ENCODER_QUALITY=quality
+  # Anything but an exact "key" keeps the stricter key-and-password login.
+  [ "$AUTH_MODE" = key ] || AUTH_MODE="key+password"
   return 0
 }
 
@@ -169,6 +184,16 @@ SUNSHINE_NAME="$SUNSHINE_NAME"
 
 # Keep Wake-on-LAN (magic packet only) switched on for wired connections.
 WAKE_ON_LAN="$WAKE_ON_LAN"
+
+# The video encoder's preset: quality (sharpest), balanced, speed (lowest delay) or
+# auto (the graphics driver's default). Use balanced or speed if Moonlight's stats
+# (Ctrl+Alt+Shift+S) show host processing latency above one frame (16.7 ms at 60 FPS).
+ENCODER_QUALITY="$ENCODER_QUALITY"
+
+# What an SSH login needs. key+password (the default): your SSH key AND the $USER_NAME
+# password. key: the SSH key only, so give it a strong passphrase. sudo always needs
+# the password. See docs/security.md.
+AUTH_MODE="$AUTH_MODE"
 EOF
   install -m 644 "$tmp" "$CONFIG"; rm -f "$tmp"
   [ -n "$R" ] || chown root:root "$CONFIG"
@@ -284,6 +309,27 @@ choose_options() {
     echo "  Use letters, numbers, dots, dashes or underscores (up to 40)."
   done
   SUNSHINE_NAME=$v
+  echo
+  echo "The encoder preset trades picture quality against delay. 'quality' is the sharpest and"
+  echo "suits most streams up to 4K at 60 FPS. Pick 'balanced' for 4K at 120 FPS, or if the"
+  echo "stream lags. 'speed' has the lowest delay. 'auto' leaves it to the graphics driver."
+  while :; do
+    v=$(ask "  Encoder preset: quality, balanced, speed or auto [$ENCODER_QUALITY]: "); v=${v:-$ENCODER_QUALITY}
+    [[ "$v" =~ ^(quality|balanced|speed|auto)$ ]] && break
+    echo "  Type quality, balanced, speed or auto."
+  done
+  ENCODER_QUALITY=$v
+  echo
+  echo "How SSH logins work. key+password (the default) needs your SSH key AND the $USER_NAME"
+  echo "password, so a copied key file is useless on its own. key needs the SSH key only: one"
+  echo "passphrase, or none once your PC remembers it. Only choose key if the key has a strong"
+  echo "passphrase. sudo always needs the password. Details: docs/security.md."
+  while :; do
+    v=$(ask "  Login: key+password or key [$AUTH_MODE]: "); v=${v:-$AUTH_MODE}
+    [[ "$v" =~ ^(key\+password|key)$ ]] && break
+    echo "  Type key+password or key."
+  done
+  AUTH_MODE=$v
 }
 
 # Show the TV, ignore the dummy. Used at boot, by the idle timer and by --setup.
@@ -384,6 +430,8 @@ apply() {
   local user_uid ips_ssh="" ip set_ips sudo_tee=""
   user_uid=$(id -u "$USER_NAME" 2>/dev/null) || { [ -n "$R" ] && user_uid=1000; } || die "User $USER_NAME doesn't exist"
   for ip in $ALLOWED_IPS $REMOTE_IPS; do ips_ssh+=" $USER_NAME@$ip"; done
+  local auth_methods=publickey,password password_auth=yes auth_text="key AND password"
+  [ "$AUTH_MODE" = key ] && { auth_methods=publickey; password_auth=no; auth_text="key only (AUTH_MODE=key)"; }
   set_ips=$(echo "$ALLOWED_IPS $REMOTE_IPS" | xargs | sed 's/ /, /g')
 
   # SSH lockdown
@@ -406,7 +454,7 @@ Requires=steam-remote-guard.service
 After=steam-remote-guard.service steam-remote-heal.service
 
 [Service]
-ExecStartPre=/usr/bin/sh -c '/usr/bin/sshd -T 2>/dev/null | grep -qx "authenticationmethods publickey,password" && /usr/bin/sshd -T 2>/dev/null | grep -q "^allowusers "'
+ExecStartPre=/usr/bin/sh -c '/usr/bin/sshd -T 2>/dev/null | grep -qxE "authenticationmethods (publickey,password|publickey)" && /usr/bin/sshd -T 2>/dev/null | grep -q "^allowusers "'
 EOF
   # SteamOS updates discard /etc changes not on a keep list. Add ours, so the
   # protections survive updates instead of relying on the boot-time repair alone.
@@ -418,13 +466,13 @@ EOF
 /etc/systemd/system/steam-remote-idle.timer
 EOF
   put "$SSHD_DROPIN" 644 <<EOF && ssh_changed=1
-# Steam Machine Remote Access: only $USER_NAME, only from the allowed PCs, key AND password.
+# Steam Machine Remote Access: only $USER_NAME, only from the allowed PCs, $auth_text.
 PermitRootLogin no
 AddressFamily inet
 AllowUsers$ips_ssh
-AuthenticationMethods publickey,password
+AuthenticationMethods $auth_methods
 PubkeyAuthentication yes
-PasswordAuthentication yes
+PasswordAuthentication $password_auth
 KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 MaxAuthTries 4
@@ -503,6 +551,7 @@ ExecStartPre=-/usr/bin/setfacl -P -m u:root:x /run/user/$user_uid /run/user/$use
 ExecStart=/usr/bin/flatpak run --system --socket=wayland --env=QT_QPA_PLATFORM=offscreen $SUN_APP
 ExecStop=/usr/bin/flatpak kill $SUN_APP
 ExecStopPost=-$SELF_REAL --backup-sunshine
+ExecStopPost=-/bin/sh -c '[ "\$\$SERVICE_RESULT" = success ] && exec /usr/bin/runuser -u $USER_NAME -- $SELF_REAL --composite off'
 Restart=on-failure
 RestartSec=5
 EOF
@@ -517,14 +566,21 @@ wan_encryption_mode = 2
 upnp = disabled
 origin_web_ui_allowed = pc
 EOF
-  else
-    local kv k
-    for kv in "sunshine_name = $SUNSHINE_NAME" "address_family = ipv4" "lan_encryption_mode = 2" \
-              "wan_encryption_mode = 2" "upnp = disabled" "origin_web_ui_allowed = pc"; do
+  fi
+  if [ -e "$SUN_CONF" ]; then
+    # The encoder preset applies to whichever GPU encoder Sunshine picks (VA-API or Vulkan).
+    # Sunshine versions before 2026.906 ignore these two lines.
+    local kv k quality=()
+    [ "$ENCODER_QUALITY" = auto ] || quality=("vaapi_quality = $ENCODER_QUALITY" "vk_quality = $ENCODER_QUALITY")
+    for kv in "sunshine_name = $SUNSHINE_NAME" "capture = kms" "address_family = ipv4" "lan_encryption_mode = 2" \
+              "wan_encryption_mode = 2" "upnp = disabled" "origin_web_ui_allowed = pc" ${quality[@]+"${quality[@]}"}; do
       k=${kv%% =*}
       grep -qxF "$kv" "$SUN_CONF" && continue
       sed -i "/^$k *=/d" "$SUN_CONF" && echo "$kv" >>"$SUN_CONF" && CHANGED+=("Sunshine: $kv")
     done
+    if [ "$ENCODER_QUALITY" = auto ] && grep -qE '^(vaapi|vk)_quality *=' "$SUN_CONF"; then
+      sed -i -E '/^(vaapi|vk)_quality *=/d' "$SUN_CONF" && CHANGED+=("Sunshine: encoder preset back to the driver's default")
+    fi
   fi
   [ -e "$SUN_STATE" ] || log "note: Sunshine has no web UI login or pairing yet (run steam-pair from your PC)."
 
@@ -680,6 +736,237 @@ print(found or "")
 PY
 }
 
+# ------------------------------------------------------------------ stream (no root)
+# Game Mode (gamescope) is controlled through properties on its X root window.
+gs_prop() {   # NAME: print the numeric value of a gamescope root property, or nothing
+  DISPLAY=:0 timeout 5 xprop -root "$1" 2>/dev/null | sed -n 's/^[^=]*= *\([0-9][0-9]*\).*/\1/p' | head -n 1
+}
+in_game_mode() {   # gamescope sets this property as soon as it starts
+  [ -n "$(gs_prop GAMESCOPE_HDR_OUTPUT_FEEDBACK)" ] || pgrep -x 'gamescope|gamescope-wl' >/dev/null 2>&1
+}
+
+# Game Mode normally shows the game and Steam's menus on separate hardware layers and
+# lets the display hardware do part of the colour work. Sunshine captures only one
+# layer, so the stream can miss menus, go black, or get HDR colours wrong. Forcing
+# composition draws everything, colour-corrected, onto one layer first. It costs a
+# little GPU time, so it's only on while streaming. "off" puts back what was there
+# before (on, if you'd turned on Steam's own Force Composite developer option). The
+# property is harmless in Desktop Mode, so "on" sets it whatever the mode. "off" only
+# acts if "on" ran, so it never turns off a Force Composite you set yourself.
+composite() {
+  local want=${1:-} state cur prev saved_boot boot
+  [[ "$want" =~ ^(on|off)$ ]] || die "Usage: $0 --composite on|off"
+  # Remember what was there before; the runtime folder if there is one (cleared on reboot,
+  # like gamescope's own state), otherwise the home folder's cache.
+  state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [ ! -d "$state" ] || [ ! -w "$state" ]; then state="$HOME/.cache"; mkdir -p "$state" 2>/dev/null; fi
+  state="$state/steam-remote-composite"
+  command -v xprop >/dev/null 2>&1 || { warn "xprop is missing"; return 1; }
+  # The saved value is tied to this boot: after a reboot (gamescope starts afresh) an old
+  # one means nothing, and must not be "restored".
+  boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  read -r prev saved_boot 2>/dev/null <"$state" || { prev=""; saved_boot=""; }
+  [ "$saved_boot" = "$boot" ] || { rm -f "$state"; prev=""; }
+  if [ "$want" = on ]; then
+    cur=$(gs_prop GAMESCOPE_COMPOSITE_FORCE)
+    [ -e "$state" ] || { echo "${cur:-0} $boot" >"$state"; } 2>/dev/null
+    DISPLAY=:0 timeout 5 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 1
+  else
+    [ -n "$prev" ] || return 0   # "on" didn't run this boot: nothing of ours to undo
+    rm -f "$state"
+    [ "$prev" = 1 ] && return 0
+    cur=$(gs_prop GAMESCOPE_COMPOSITE_FORCE)
+    [ "${cur:-0}" = 0 ] && return 0
+    DISPLAY=:0 timeout 5 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 0
+  fi
+}
+
+# What the display behind the stream offers, from its EDID: the biggest mode and
+# whether it accepts HDR10. Prints: "WIDTH HEIGHT HZ HDR" where HDR is 1 (HDR10: what Game
+# Mode needs, PQ and BT.2020 RGB), 2 (PQ, but not BT.2020 RGB, so Game Mode won't use it)
+# or 0 (no HDR).
+edid_caps() {
+  [ -s "$1" ] || return 1
+  python3 -I - "$1" 2>/dev/null <<'PY'
+import sys
+e = open(sys.argv[1], "rb").read()
+if len(e) < 128 or e[:8] != b"\x00\xff\xff\xff\xff\xff\xff\x00":
+    sys.exit(1)
+# Common CTA-861 video codes: VIC -> (width, height, Hz).
+VIC = {4: (1280, 720, 60), 16: (1920, 1080, 60), 31: (1920, 1080, 50), 32: (1920, 1080, 24),
+       33: (1920, 1080, 25), 34: (1920, 1080, 30), 47: (1280, 720, 120), 63: (1920, 1080, 120),
+       64: (1920, 1080, 100), 93: (3840, 2160, 24), 94: (3840, 2160, 25), 95: (3840, 2160, 30),
+       96: (3840, 2160, 50), 97: (3840, 2160, 60), 98: (4096, 2160, 24), 99: (4096, 2160, 25),
+       100: (4096, 2160, 30), 101: (4096, 2160, 50), 102: (4096, 2160, 60), 114: (3840, 2160, 48),
+       117: (3840, 2160, 100), 118: (3840, 2160, 120), 218: (4096, 2160, 100), 219: (4096, 2160, 120)}
+VIC.update({v: (7680, 4320, hz) for v, hz in zip(range(194, 202), (24, 25, 30, 48, 50, 60, 100, 120))})
+HDMI_VIC = {1: (3840, 2160, 30), 2: (3840, 2160, 25), 3: (3840, 2160, 24), 4: (4096, 2160, 24)}
+modes, pq, bt2020 = set(), 0, 0
+
+def dtd(d):
+    if len(d) < 18:
+        return
+    clock = int.from_bytes(d[0:2], "little") * 10000
+    if not clock or d[17] & 0x80:            # empty, or interlaced
+        return
+    ha, hb = d[2] | (d[4] & 0xF0) << 4, d[3] | (d[4] & 0x0F) << 8
+    va, vb = d[5] | (d[7] & 0xF0) << 4, d[6] | (d[7] & 0x0F) << 8
+    if ha and va:
+        modes.add((ha, va, round(clock / ((ha + hb) * (va + vb)))))
+
+def displayid(d, khz):                     # DisplayID type I (10 kHz) / VII (1 kHz) timing
+    if len(d) < 20:
+        return
+    clock = (int.from_bytes(d[0:3], "little") + 1) * khz * 1000
+    ha, hb = int.from_bytes(d[4:6], "little") + 1, int.from_bytes(d[6:8], "little") + 1
+    va, vb = int.from_bytes(d[12:14], "little") + 1, int.from_bytes(d[14:16], "little") + 1
+    if not d[3] & 0x10:                    # progressive only
+        modes.add((ha, va, round(clock / ((ha + hb) * (va + vb)))))
+
+def vics(data):
+    for v in data:
+        v = v & 0x7F if 129 <= v <= 192 else v   # 129-192: "native" flag on VICs 1-64
+        if v in VIC:
+            modes.add(VIC[v])
+
+for off in (54, 72, 90, 108):
+    dtd(e[off:off + 18])
+for i in range(1, e[126] + 1):
+    b = e[128 * i:128 * (i + 1)]
+    if len(b) == 128 and b[0] == 0x70:        # DisplayID extension
+        p, end = 5, min(5 + b[2], 127)
+        while p + 3 <= end:
+            tag, ln = b[p], b[p + 2]
+            if tag in (0x03, 0x22):
+                for q in range(p + 3, p + 3 + ln - 19, 20):
+                    displayid(b[q:q + 20], 10 if tag == 0x03 else 1)
+            p += 3 + ln
+        continue
+    if len(b) < 128 or b[0] != 0x02:          # otherwise CTA-861 extension blocks only
+        continue
+    end, p = b[2], 4
+    while p < min(end, 127):
+        tag, ln = b[p] >> 5, b[p] & 0x1F
+        body = b[p + 1:p + 1 + ln]
+        if tag == 2:
+            vics(body)
+        elif tag == 3 and body[:3] == b"\x03\x0c\x00" and len(body) > 7 and body[7] & 0x20:
+            q = 8 + (2 if body[7] & 0x80 else 0) + (2 if body[7] & 0x40 else 0)
+            if q + 1 < len(body):                # HDMI 1.4 VICs (4K at 24-30 Hz)
+                for v in body[q + 2:q + 2 + (body[q + 1] >> 5)]:
+                    modes.update([HDMI_VIC[v]] if v in HDMI_VIC else [])
+        elif tag == 7 and body:
+            if body[0] == 6 and len(body) > 1 and body[1] & 0x04:   # HDR static metadata: PQ
+                pq = 1
+            elif body[0] == 5 and len(body) > 1 and body[1] & 0x80:   # colorimetry: BT.2020 RGB
+                bt2020 = 1
+            elif body[0] == 14:                  # 4:2:0-only video codes
+                vics(body[1:])
+        p += 1 + ln
+    q = end
+    while 4 <= q <= 109 and (b[q] or b[q + 1]):
+        dtd(b[q:q + 18]); q += 18
+if any(m[:2] == (3840, 2160) for m in modes):   # report 4K UHD, not cinema 4K
+    modes = {m for m in modes if m[:2] != (4096, 2160)}
+if not modes:
+    sys.exit(1)
+w, h, hz = max(modes, key=lambda m: (m[0] * m[1], m[2]))
+print(w, h, max(m[2] for m in modes if m[:2] == (w, h)), (1 if bt2020 else 2) if pq else 0)
+PY
+}
+
+stream_output() {   # the output being streamed: the configured one, else the active one
+  local d
+  if [ -n "$STREAM_OUTPUT" ] && [ -e "$DRM/$STREAM_OUTPUT/status" ]; then echo "$STREAM_OUTPUT"; return; fi
+  for d in "$DRM"/card*-*; do
+    [ "$(cat "$d/enabled" 2>/dev/null)" = enabled ] && { echo "${d##*/}"; return; }
+  done
+}
+
+stream_info() {
+  local want=${1:-}
+  load_config || true
+  local out w h hz hdr10="" hdr10_txt gm="" hdr_on="" hdr_out="" fix="" log enc
+  out=$(stream_output)
+  if [ -z "$out" ]; then
+    echo "Stream output: none active. Is the dummy plug (or TV) connected?"
+  else
+    if read -r w h hz hdr10 < <(edid_caps "$DRM/$out/edid"); then
+      case "$hdr10" in
+        1) hdr10_txt=HDR10 ;; 2) hdr10_txt="HDR, but not the BT.2020 colours Game Mode needs" ;; *) hdr10_txt="no HDR" ;;
+      esac
+      echo "Stream output ${out#card*-}: up to ${w}x${h} at ${hz} Hz, $hdr10_txt"
+    else
+      hdr10=""
+      echo "Stream output ${out#card*-}: $(cat "$DRM/$out/status" 2>/dev/null) (couldn't read what it supports)"
+    fi
+  fi
+  if command -v xprop >/dev/null 2>&1 && in_game_mode; then
+    gm=1
+    hdr_on=$(gs_prop GAMESCOPE_DISPLAY_HDR_ENABLED)
+    hdr_out=$(gs_prop GAMESCOPE_HDR_OUTPUT_FEEDBACK)
+    fix=$(gs_prop GAMESCOPE_COMPOSITE_FORCE)
+    echo "Game Mode: HDR $([ "$hdr_on" = 1 ] && echo on || echo off), capture fix $([ "$fix" = 1 ] && echo on || echo off)"
+  elif ! command -v xprop >/dev/null 2>&1; then
+    echo "Game Mode: unknown (xprop is missing)"
+  else
+    echo "Desktop Mode: HDR follows the desktop's setting (System Settings > Display & Monitor)"
+  fi
+  # shellcheck disable=SC2046  # the invocation ID is one word
+  log=$(journalctl -u "$SUN_UNIT" _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value "$SUN_UNIT" 2>/dev/null) --no-pager -o cat 2>/dev/null)
+  enc=$(sed -n 's/.*Found HEVC encoder: [^[]*\[\([a-z]*\)\].*/\1/p' <<<"$log" | tail -n 1)
+  [ -n "$enc" ] || enc=$(sed -n 's/.*Found H.264 encoder: [^[]*\[\([a-z]*\)\].*/\1/p' <<<"$log" | tail -n 1)
+  case "$enc" in
+    "") ;;
+    software) echo "Encoder: software (the graphics card's encoder failed, so expect a soft, laggy picture; see its log)" ;;
+    *) echo "Encoder: $enc, preset $ENCODER_QUALITY$(grep -q 'Found AV1 encoder' <<<"$log" && echo ', AV1 available')" ;;
+  esac
+  if [ -n "$gm" ]; then
+    if [ "$hdr10" = 0 ] || [ "$hdr10" = 2 ]; then
+      echo "HDR: not possible: the stream output doesn't offer HDR10. An HDR dummy plug is needed (docs/quality.md)"
+    elif [ "$hdr_out" = 1 ] && [ "$want" = sdr ]; then
+      echo "HDR: ready, but this PC is set to SDR (STREAM_HDR=\"no\")"
+    elif [ "$hdr_out" = 1 ] && [ "$want" = hdr ]; then
+      echo "HDR: ready, and this PC asks Moonlight for HDR"
+    elif [ "$hdr_out" = 1 ]; then
+      echo "HDR: ready. Turn on Enable HDR in Moonlight to use it"
+    elif [ "$hdr_on" = 1 ]; then
+      echo "HDR: on in Steam, but Game Mode doesn't see HDR on this output (docs/quality.md)"
+    else
+      echo "HDR: off. While streaming, turn on Steam > Settings > Display > Enable HDR (remembered for this plug)"
+    fi
+  fi
+}
+
+# Wait for Moonlight to start a stream, then say whether it's SDR or HDR. Sunshine logs
+# "Color coding" and "Color depth" when a stream starts. 10-bit SDR means Moonlight asked
+# for HDR but the Steam Machine's output isn't in HDR; 8-bit means Moonlight didn't ask.
+stream_watch() {
+  local secs=${1:-300} want=${2:-} line coding="" depth="" pid
+  [[ "$secs" =~ ^[0-9]+$ ]] || secs=300
+  exec 3< <(timeout "$secs" journalctl -u "$SUN_UNIT" -f -n 0 -o cat 2>/dev/null)
+  pid=$!
+  while IFS= read -r line <&3; do
+    case "$line" in
+      *"Color coding: "*) coding=${line#*Color coding: } ;;
+      *"Color depth: "*)  depth=${line#*Color depth: }; break ;;
+    esac
+  done
+  kill "$pid" 2>/dev/null; exec 3<&-
+  [ -n "$depth" ] || return 0
+  coding=$(printf '%s' "$coding" | tr -cd '[:print:]'); depth=$(printf '%s' "$depth" | tr -cd '[:print:]')
+  case "$coding" in
+    HDR*) echo "Moonlight connected: streaming in HDR ($depth)" ;;
+    *) if [ "$depth" = 10-bit ]; then
+         echo "Moonlight connected: streaming in SDR. Moonlight asked for HDR, but the Steam Machine's output isn't in HDR (see the stream check above, or docs/quality.md)"
+       elif [ "$want" != sdr ] && command -v xprop >/dev/null 2>&1 && [ "$(gs_prop GAMESCOPE_HDR_OUTPUT_FEEDBACK)" = 1 ]; then
+         echo "Moonlight connected: streaming in SDR ($depth). For HDR, turn on Enable HDR in Moonlight's settings"
+       else
+         echo "Moonlight connected: streaming in SDR ($depth)"
+       fi ;;
+  esac
+}
+
 # ------------------------------------------------------------------ check (no root)
 check() {
   local bad=0 f u
@@ -775,7 +1062,7 @@ setup() {
     done
     [ -z "$missing" ] || die "This system is missing:$missing. It should be SteamOS 3 or later; other systems aren't supported."
     command -v nmcli >/dev/null 2>&1 || warn "nmcli (NetworkManager) is missing, so Wake-on-LAN can't be set up."
-    command -v xprop >/dev/null 2>&1 || warn "xprop is missing, so the Game Mode black-screen workaround won't work."
+    command -v xprop >/dev/null 2>&1 || warn "xprop is missing, so the Game Mode capture fix and the HDR report won't work."
   fi
   echo "This makes SSH and Sunshine reachable from your PC(s) only, needing your key AND"
   echo "the $USER_NAME password, and installs the self-heal service. It's safe to run again."
@@ -811,7 +1098,7 @@ setup() {
 
   # Other options
   local wol_text="on"; [ "$WAKE_ON_LAN" = yes ] || wol_text="off"
-  if [ "$first" = 1 ] || [ "$(ask "Options: idle stop after ${IDLE_MINUTES} min, Wake-on-LAN ${wol_text}, name '${SUNSHINE_NAME}'. Change them? [y/N] ")" = y ]; then
+  if [ "$first" = 1 ] || [ "$(ask "Options: idle stop after ${IDLE_MINUTES} min, Wake-on-LAN ${wol_text}, name '${SUNSHINE_NAME}', encoder preset ${ENCODER_QUALITY}, login ${AUTH_MODE}. Change them? [y/N] ")" = y ]; then
     choose_options
   fi
 
@@ -850,7 +1137,7 @@ setup() {
     else warn "Sunshine didn't confirm screen capture. Its log: journalctl -u $SUN_UNIT -b --no-pager | tail -n 30"; fi
   fi
   echo
-  say "Done. From now on SSH needs your key AND the $USER_NAME password, from $(echo "$ALLOWED_IPS $REMOTE_IPS" | xargs | sed 's/ / or /g') only."
+  say "Done. From now on SSH needs your key$([ "$AUTH_MODE" = key ] || echo " AND the $USER_NAME password"), from $(echo "$ALLOWED_IPS $REMOTE_IPS" | xargs | sed 's/ / or /g') only."
   echo "   Next, on your PC: steam-connect nostream, then steam-pair (see the guide)."
 }
 
@@ -926,6 +1213,26 @@ set_remote() {
   else say "Remote access off: home network only."; fi
 }
 
+set_encoder() {
+  need_root
+  [[ "${1:-}" =~ ^(quality|balanced|speed|auto)$ ]] || die "Usage: sudo $0 --set-encoder quality|balanced|speed|auto"
+  load_config || die "Run --setup first."
+  ENCODER_QUALITY=$1
+  write_config; apply
+  say "Encoder preset: $ENCODER_QUALITY. It takes effect the next time Sunshine starts."
+}
+
+set_auth() {
+  need_root
+  [[ "${1:-}" =~ ^(key\+password|key)$ ]] || die "Usage: sudo $0 --set-auth key+password|key"
+  load_config || die "Run --setup first."
+  AUTH_MODE=$1
+  write_config; apply
+  if [ "$AUTH_MODE" = key ]; then say "SSH logins now need your SSH key only. sudo still needs the password."
+  else say "SSH logins now need your SSH key AND the $USER_NAME password."; fi
+  echo "   Logins already open stay connected."
+}
+
 # ------------------------------------------------------------------ uninstall
 uninstall() {
   need_root
@@ -970,11 +1277,17 @@ case "${1:---apply}" in
   --remove-client)   shift; remove_client "$@" ;;
   --set-remote)      shift; set_remote "$@" ;;
   --remote-add|--remote-remove) remote_cmd "$@" ;;
+  --set-encoder)     shift; set_encoder "$@" ;;
+  --set-auth)        shift; set_auth "$@" ;;
+  --auth-mode)       load_config >/dev/null 2>&1; echo "$AUTH_MODE" ;;
   --uninstall)       shift; uninstall "$@" ;;
   --boot-display)    need_root; load_config && show_tv ;;
   --idle-check)      need_root; idle_check ;;
   --backup-sunshine) need_root; backup_sunshine ;;
   --wol-state)       wol_state ;;
+  --stream-info)     stream_info "${2:-}" ;;
+  --stream-watch)    stream_watch "${2:-300}" "${3:-}" ;;
+  --composite)       composite "${2:-}" ;;
   --version)         echo "steam-remote-server $VERSION" ;;
   -h|--help)         sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)                 die "Unknown option '$1'. See: $0 --help" ;;

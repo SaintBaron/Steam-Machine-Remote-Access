@@ -35,3 +35,13 @@ SUNSHINE_NAME="steam-machine"
 
 # Keep Wake-on-LAN (magic packet only) on for wired connections. yes or no.
 WAKE_ON_LAN="yes"
+
+# The video encoder's preset: quality (sharpest, the default), balanced (for 4K at
+# 120 FPS, or if the stream lags), speed (lowest delay) or auto (the graphics driver's
+# default). Needs Sunshine 2026.906 or later. See docs/quality.md.
+ENCODER_QUALITY="quality"
+
+# What an SSH login needs. key+password (the default): your SSH key AND the account's
+# password. key: the SSH key only, so give it a strong passphrase. sudo always needs the
+# password. Anything else counts as key+password. See docs/security.md.
+AUTH_MODE="key+password"

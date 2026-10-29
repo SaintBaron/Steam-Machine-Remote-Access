@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.0 - 2026-10-29
+
+- Picture quality and HDR guide: `docs/quality.md`.
+- Every connection prints a **stream check**: the dummy plug's best mode and whether it accepts HDR, Game Mode's HDR setting, the encoder, and whether HDR can work. When Moonlight connects, it says whether the stream is SDR or HDR, and which side to fix if it isn't what you asked for.
+- New `steam-remote-setup quality` (Windows: `steam-remote-setup.ps1 quality`): resolution, frame rate, bitrate, codec and HDR, handed to Moonlight on every connection, plus the Steam Machine's encoder preset.
+- The first-time setup now offers everything: a new optional stream quality step (step 3), the less common PC settings (Moonlight app, capture fix, wake wait, Wake-on-LAN broadcast, name in Sunshine) in step 1, and the encoder preset among the Steam Machine's options. The setup now has 8 steps.
+- The stream check doesn't suggest turning HDR on when you've set `STREAM_HDR="no"`.
+- Optional key-only SSH logins (`AUTH_MODE="key"`): one passphrase instead of a passphrase and a password. Key and password stays the default. Choose it in the setup or with `steam-remote-setup auth`, which refuses if the key has no passphrase. SSH's start check accepts either mode and still refuses SteamOS's defaults. See `docs/security.md`.
+- The self-heal and repairs rebuild everything from the Steam Machine's config, including the login mode, encoder preset and the capture-fix clean-up. The saved capture-fix state is tied to the current boot, so a stale one is never "restored".
+- A lower bitrate is used automatically when connecting through the VPN (`STREAM_BITRATE_AWAY`, 20 Mbps by default).
+- Linux and macOS: Moonlight's messages go to `~/.local/state/steam-remote/moonlight.log`, and `steam-connect` warns if an older Moonlight rejects one of the stream settings.
+- The Steam Machine's video encoder now uses its `quality` preset by default (`ENCODER_QUALITY`; needs Sunshine 2026.906 or later). Choose `balanced`, `speed` or `auto` instead with the setup.
+- The Game Mode capture fix (`BLACK_SCREEN_FIX`) now also keeps HDR colours and Steam's menus right in the stream. It's undone whenever Sunshine stops, including by the idle timer, and puts back Steam's own *Force Composite* setting if you had it on.
+
+## 1.1.0 - 2026-10-29
+
+- macOS support (12 Monterey or later): the same commands as Linux, double-click launchers, and a macOS guide (`docs/macos.md`).
+- Fixed: closing the `steam-connect` window could, rarely, skip the automatic disconnect.
+
 ## 1.0.1 - 2026-10-29
 
 - SteamOS updates can no longer leave SSH open with SteamOS's default settings:

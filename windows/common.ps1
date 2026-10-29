@@ -2,7 +2,7 @@
 # https://github.com/SaintBaron/Steam-Machine-Remote-Access
 # Dot-sourced by the other scripts; not run on its own. Works in Windows PowerShell 5.1 and PowerShell 7.
 
-$SrVersion    = '1.0.1'
+$SrVersion    = '1.2.0'
 $SrConfigDir  = Join-Path $env:APPDATA 'steam-remote'
 $SrConfig     = Join-Path $SrConfigDir 'config'
 $SrMacCache   = Join-Path $SrConfigDir 'mac'
@@ -11,7 +11,8 @@ $SrKit        = '/home/.steam-remote'                  # on the Steam Machine
 $SrServer     = "$SrKit/steam-remote-server.sh"        # on the Steam Machine
 $SrSunUnit    = 'steam-remote-sunshine.service'        # on the Steam Machine
 $SrConfigKeys = 'MACHINE_IP','REMOTE_MODE','REMOTE_PC_IP','REMOTE_MACHINE_IP','MACHINE_USER','HOST_ALIAS','KEY_FILE','MACHINE_MAC','BROADCAST',
-                'WAKE_TIMEOUT','MOONLIGHT_APP','CLIENT_NAME','WEBUI_PORT','PERSIST','KEEPALIVE','BLACK_SCREEN_FIX'
+                'WAKE_TIMEOUT','MOONLIGHT_APP','CLIENT_NAME','WEBUI_PORT','PERSIST','KEEPALIVE','BLACK_SCREEN_FIX',
+                'STREAM_RESOLUTION','STREAM_FPS','STREAM_BITRATE','STREAM_BITRATE_AWAY','STREAM_CODEC','STREAM_HDR'
 
 function Write-SrInfo([string]$Message) { Write-Host '==> ' -ForegroundColor Blue -NoNewline; Write-Host $Message }
 function Write-SrWarn([string]$Message) { Write-Host "Warning: $Message" -ForegroundColor Yellow }
@@ -34,6 +35,7 @@ function Read-SrConfigFile([string]$Path) {
         KEY_FILE = '~/.ssh/steam-machine_ed25519'; MACHINE_MAC = ''; BROADCAST = ''
         WAKE_TIMEOUT = '90'; MOONLIGHT_APP = 'Desktop'; CLIENT_NAME = ''; WEBUI_PORT = '47990'
         PERSIST = '2h'; KEEPALIVE = '600'; BLACK_SCREEN_FIX = 'yes'
+        STREAM_RESOLUTION = ''; STREAM_FPS = ''; STREAM_BITRATE = ''; STREAM_BITRATE_AWAY = '20'; STREAM_CODEC = ''; STREAM_HDR = ''
     }
     if (Test-Path -LiteralPath $Path) {
         foreach ($line in Get-Content -LiteralPath $Path) {
@@ -59,6 +61,44 @@ function Import-SrConfig {
     if (-not $Cfg.BROADCAST) { $Cfg.BROADCAST = ($Cfg.MACHINE_IP -replace '\.[0-9]+$', '.255') }
     if (-not $Cfg.CLIENT_NAME) { $Cfg.CLIENT_NAME = $env:COMPUTERNAME }
     $Cfg.KEY_FILE = $Cfg.KEY_FILE -replace '^~', $HOME
+    $problem = Test-SrStreamSettings $Cfg
+    if ($problem) {
+        Write-SrWarn "$problem. Using Moonlight's own stream settings instead. Fix it with: steam-remote-setup.ps1 quality"
+        foreach ($k in 'STREAM_RESOLUTION','STREAM_FPS','STREAM_BITRATE','STREAM_BITRATE_AWAY','STREAM_CODEC','STREAM_HDR') { $Cfg[$k] = '' }
+    }
+}
+
+# Stream settings: each is empty (Moonlight decides) or a plain value. Returns a problem
+# description, or nothing. Codec names are stored the way Moonlight spells them.
+function Test-SrStreamSettings($c) {
+    if ($c.STREAM_RESOLUTION -and $c.STREAM_RESOLUTION -notmatch '^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$') { return 'STREAM_RESOLUTION must look like 3840x2160 (or be empty)' }
+    if ($c.STREAM_FPS -and $c.STREAM_FPS -notmatch '^[1-9][0-9]{1,2}$') { return 'STREAM_FPS must be a number like 60 or 120 (or be empty)' }
+    foreach ($r in $c.STREAM_BITRATE, $c.STREAM_BITRATE_AWAY) {
+        if ($r -and ($r -notmatch '^[1-9][0-9]{0,2}$' -or [int]$r -gt 500)) { return 'STREAM_BITRATE and STREAM_BITRATE_AWAY are in Mbps, from 1 to 500 (or empty)' }
+    }
+    switch -Regex ($c.STREAM_CODEC) {
+        '^$' { break }
+        '^auto$' { $c.STREAM_CODEC = 'auto'; break }
+        '^(hevc|h\.?265)$' { $c.STREAM_CODEC = 'HEVC'; break }
+        '^av1$' { $c.STREAM_CODEC = 'AV1'; break }
+        '^h\.?264$' { $c.STREAM_CODEC = 'H.264'; break }
+        default { return 'STREAM_CODEC must be auto, HEVC, AV1 or H.264 (or empty)' }
+    }
+    if ($c.STREAM_HDR -notmatch '^(yes|no|)$') { return 'STREAM_HDR must be yes, no or empty' }
+}
+
+# Moonlight's options for this stream (its bitrate is in Kbps). Away from home (through
+# a VPN), STREAM_BITRATE_AWAY replaces STREAM_BITRATE.
+function Get-SrMoonlightArgs {
+    $a = @()
+    $rate = $Cfg.STREAM_BITRATE
+    if ($Cfg.STREAM_BITRATE_AWAY -and ($Cfg.TARGET -ne $Cfg.MACHINE_IP -or -not (Test-SrHomeNetwork))) { $rate = $Cfg.STREAM_BITRATE_AWAY }
+    if ($Cfg.STREAM_RESOLUTION) { $a += '--resolution', $Cfg.STREAM_RESOLUTION }
+    if ($Cfg.STREAM_FPS) { $a += '--fps', $Cfg.STREAM_FPS }
+    if ($rate) { $a += '--bitrate', ([int]$rate * 1000) }
+    if ($Cfg.STREAM_CODEC) { $a += '--video-codec', $Cfg.STREAM_CODEC }
+    if ($Cfg.STREAM_HDR -eq 'yes') { $a += '--hdr' } elseif ($Cfg.STREAM_HDR -eq 'no') { $a += '--no-hdr' }
+    ,$a
 }
 
 function Test-SrPing([string]$Ip) {

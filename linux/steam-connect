@@ -39,7 +39,11 @@ load_config
 LOCK="${XDG_RUNTIME_DIR:-$HOME/.cache}/steam-connect.lock"
 HANGUP_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/steam-remote/disconnect.log"
 SELF=$(real_path "$0")
-XPROP_FIX="DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE"
+# Game Mode capture fix (see --composite in the server script). The xprop fallback is for
+# Steam Machines still on a server script older than 1.2.0.
+FIX_ON="$SR_SERVER --composite on 2>/dev/null || DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 1"
+FIX_OFF="{ $SR_SERVER --composite off 2>/dev/null || DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 0; }"
+WATCH_PID=""
 
 # ---------------------------------------------------------------------------
 # Disconnect. "full" (steam-connect disconnect) also closes the login forcefully and
@@ -54,12 +58,12 @@ disconnect() {
   if logged_in; then
     [ -n "$TV_ON" ] || load_outputs
     say "Stopping Sunshine${TV_ON:+ and switching back to the TV}"
-    run "$XPROP_FIX 0 >/dev/null 2>&1; sudo -n systemctl stop $SR_SUN_UNIT; ${TV_ON:-true}" \
+    run "$FIX_OFF >/dev/null 2>&1; sudo -n systemctl stop $SR_SUN_UNIT; ${TV_ON:-true}" \
       || warn "Couldn't stop Sunshine${TV_ON:+ or switch back to the TV}. Run: ssh -t $HOST_ALIAS sudo $SR_SERVER"
   elif [ "$full" = full ] && [ -t 0 ] && find_target; then
     say "No open login, so logging in once to stop Sunshine"
     # shellcheck disable=SC2029  # built here on purpose; runs on the Steam Machine
-    ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "$XPROP_FIX 0 >/dev/null 2>&1; sudo -n systemctl stop $SR_SUN_UNIT; sudo $SR_SERVER --boot-display; true" \
+    ssh -t -o HostName="$TARGET" "$HOST_ALIAS" "$FIX_OFF >/dev/null 2>&1; sudo -n systemctl stop $SR_SUN_UNIT; sudo $SR_SERVER --boot-display; true" \
       || warn "Couldn't stop Sunshine."
   else
     warn "The login had already closed. If Sunshine is still running, the Steam Machine's idle timer stops it and switches back to the TV."
@@ -92,9 +96,15 @@ if [ "$MODE" = hangup ]; then disconnect; exit 0; fi
 # Exit handling: disconnect once, whatever ends the script after login.
 # ---------------------------------------------------------------------------
 SR_ARMED=0
+# shellcheck disable=SC2317  # runs from the traps below
+stop_watch() {   # the SDR/HDR watcher started with Moonlight
+  [ -n "$WATCH_PID" ] || return 0
+  pkill -P "$WATCH_PID" 2>/dev/null; kill "$WATCH_PID" 2>/dev/null; WATCH_PID=""
+}
 # shellcheck disable=SC2317  # runs from a trap
 on_exit() {
   local rc=$?
+  stop_watch
   if [ "$SR_ARMED" = 1 ]; then
     SR_ARMED=0
     echo
@@ -112,6 +122,7 @@ on_exit() {
 # shellcheck disable=SC2317  # runs from a trap
 on_hangup() {
   trap '' HUP   # ignored signals stay ignored in children, so the detached copy survives the hangup
+  stop_watch
   if [ "$SR_ARMED" = 1 ]; then
     SR_ARMED=0
     mkdir -p "$(dirname "$HANGUP_LOG")"
@@ -142,7 +153,7 @@ if logged_in; then
   say "Already logged in"
 else
   rm -f "$CTL"
-  say "Logging in: your key passphrase, then the Steam Machine's password"
+  say "Logging in: your key passphrase, then the Steam Machine's password (unless you chose key-only logins)"
   ssh -M -S "$CTL" -o HostName="$TARGET" -o ControlPersist="$PERSIST" -o ExitOnForwardFailure=yes \
       -L "127.0.0.1:$WEBUI_PORT:127.0.0.1:47990" -fN "$HOST_ALIAS" 9>&- \
     || die "Login failed. If it mentions port $WEBUI_PORT, run: steam-connect disconnect"
@@ -200,21 +211,38 @@ if grep -q "Unable to find display or encoder" <<<"$LOG"; then
 fi
 say "Sunshine is ready. Web UI (while this window is open): https://localhost:$WEBUI_PORT"
 
-# 8. Game Mode black-screen workaround (Sunshine 2026.906+, LizardByte/Sunshine #5839):
-#    make gamescope draw onto one layer. It resets on reboot or mode switch.
+# 8. Game Mode capture fix: make Game Mode draw everything onto one layer while streaming,
+#    so the stream isn't black, includes Steam's menus, and has the right HDR colours.
+#    Undone when Sunshine stops.
 if [ "$BLACK_SCREEN_FIX" = yes ]; then
-  if run "$XPROP_FIX 1" >/dev/null 2>&1; then say "Applied the Game Mode black-screen workaround"
-  else warn "Couldn't apply the Game Mode black-screen workaround (fine in Desktop Mode)."; fi
+  run "$FIX_ON" >/dev/null 2>&1 || warn "Couldn't apply the Game Mode capture fix (fine in Desktop Mode)."
 fi
 
-# 9. Moonlight.
+# 9. What the stream can do: resolution, HDR, encoder (needs a 1.2.0+ server script).
+if INFO=$(run "$SR_SERVER --stream-info $(case "$STREAM_HDR" in no) echo sdr ;; yes) echo hdr ;; esac)" 2>/dev/null) && [ -n "$INFO" ]; then
+  say "Stream check"
+  while IFS= read -r l; do echo "    $l"; done <<<"$INFO"
+fi
+
+# 10. Moonlight, with this PC's stream settings. A watcher reports SDR or HDR once it connects.
 if [ "$STREAM" = 1 ]; then
-  say "Starting Moonlight ($MOONLIGHT_APP)"
+  ARGS=(); n=0   # (a counter, because bash 3.2 treats an empty array as unset)
+  while IFS= read -r a; do ARGS[n]=$a; n=$((n + 1)); done < <(moonlight_args)
+  if [ "$n" -gt 0 ]; then say "Starting Moonlight ($MOONLIGHT_APP; ${ARGS[*]})"
+  else say "Starting Moonlight ($MOONLIGHT_APP)"; fi
+  { run "$SR_SERVER --stream-watch 300 $([ "$STREAM_HDR" = no ] && echo sdr)" 2>/dev/null | while IFS= read -r l; do say "$l"; done; } 9>&- &
+  WATCH_PID=$!
+  # Moonlight's own messages go to a log, so an older Moonlight that rejects an option
+  # (it exits with "Unknown options") can be reported instead of silently not opening.
+  MOON_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/steam-remote/moonlight.log"
+  mkdir -p "$(dirname "$MOON_LOG")"; : >"$MOON_LOG"
   # shellcheck disable=SC2086  # MOONLIGHT may be "flatpak run <id>"
-  detach $MOONLIGHT stream "$TARGET" "$MOONLIGHT_APP" </dev/null >/dev/null 2>&1 9>&- &
+  detach $MOONLIGHT stream ${ARGS[@]+"${ARGS[@]}"} "$TARGET" "$MOONLIGHT_APP" </dev/null >>"$MOON_LOG" 2>&1 9>&- &
+  { sleep 4; bad=$(grep -m 1 'Unknown options' "$MOON_LOG" 2>/dev/null) \
+      && warn "Moonlight didn't accept the stream settings ($bad). Update Moonlight, or clear them with: steam-remote-setup quality"; } 9>&- &
 fi
 
-# 10. Stay open until you're done.
+# 11. Stay open until you're done.
 echo
 say "Connected. Press Q to disconnect (or Ctrl+C, or close this window)."
 LOST=0

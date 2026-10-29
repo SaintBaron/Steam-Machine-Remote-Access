@@ -27,7 +27,7 @@ if (-not $mutex.WaitOne(0)) { Stop-SrError 'steam-connect is already running in 
 # and switches back to the TV however the session ends (Q, Ctrl+C, window closed,
 # network lost). Sent base64-encoded so no quoting can break it.
 $remote = @'
-FIX=$1; RESTART=$2; PORT=$3
+FIX=$1; RESTART=$2; PORT=$3; WANT=${4:-}
 K=/home/.steam-remote; S=$K/steam-remote-server.sh; U=steam-remote-sunshine.service
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWarning:\033[0m %s\n' "$*"; }
@@ -43,10 +43,16 @@ ok() { [[ "$1" =~ ^card[0-9]+-[A-Za-z0-9-]+$ ]]; }
 SO=$(conf STREAM_OUTPUT); TV=$(conf TV_OUTPUT); SW=0
 ok "$SO" && ok "$TV" && [ "$SO" != "$TV" ] && SW=1
 show() { echo off | sudo -n tee "/sys/class/drm/$1/status" >/dev/null; echo detect | sudo -n tee "/sys/class/drm/$2/status" >/dev/null; }
-xp() { DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE "$1" >/dev/null 2>&1; }
+# Game Mode capture fix; the xprop fallback is for server scripts older than 1.2.0.
+xp() {
+  if [ "$1" = 1 ]; then "$S" --composite on >/dev/null 2>&1 && return; else "$S" --composite off >/dev/null 2>&1 && return; fi
+  DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE "$1" >/dev/null 2>&1
+}
+WATCH=
 DONE=0
 cleanup() {
   [ "$DONE" = 1 ] && return; DONE=1
+  [ -n "$WATCH" ] && { pkill -P "$WATCH" 2>/dev/null; kill "$WATCH" 2>/dev/null; }
   echo; say "Disconnecting: stopping Sunshine"
   [ "$FIX" = yes ] && xp 0
   sudo -n systemctl stop "$U"
@@ -69,6 +75,9 @@ elif ! systemctl is-active --quiet "$U"; then
 else
   say "Sunshine is already running"
 fi
+# Reports SDR or HDR once Moonlight connects (server script 1.2.0 or later).
+{ "$S" --stream-watch 300 "$WANT" 2>/dev/null | while IFS= read -r l; do say "$l"; done; } &
+WATCH=$!
 say "Waiting for Sunshine"
 for _ in $(seq 1 30); do ss -ltn | grep -q ':47989 ' && break; sleep 1; done
 ss -ltn | grep -q ':47989 ' || { warn "Sunshine didn't start. Its log:"; journalctl -u "$U" -n 20 --no-pager -o cat; exit 1; }
@@ -79,7 +88,10 @@ if journalctl -u "$U" _SYSTEMD_INVOCATION_ID="$(systemctl show -p InvocationID -
   exit 1
 fi
 say "Sunshine is ready. Web UI (while this window is open): https://localhost:$PORT"
-if [ "$FIX" = yes ]; then xp 1 && say "Applied the Game Mode black-screen workaround"; fi
+if [ "$FIX" = yes ]; then xp 1 || warn "Couldn't apply the Game Mode capture fix (fine in Desktop Mode)."; fi
+if INFO=$("$S" --stream-info "$WANT" 2>/dev/null) && [ -n "$INFO" ]; then
+  say "Stream check"; while IFS= read -r l; do echo "    $l"; done <<<"$INFO"
+fi
 echo
 say "Connected. Press Q to disconnect (or Ctrl+C, or close this window)."
 while read -rsn1 k; do case "$k" in q|Q) break ;; esac; done
@@ -97,23 +109,26 @@ try {
     $fix = if ($Cfg.BLACK_SCREEN_FIX -eq 'yes') { 'yes' } else { 'no' }
     $rst = if ($Restart) { 'yes' } else { 'no' }
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($remote -replace "`r`n", "`n")))
-    $command = "bash <(echo $b64 | base64 -d) $fix $rst $($Cfg.WEBUI_PORT)"
+    $want = if ($Cfg.STREAM_HDR -eq 'no') { 'sdr' } elseif ($Cfg.STREAM_HDR -eq 'yes') { 'hdr' } else { 'any' }
+    $command = "bash <(echo $b64 | base64 -d) $fix $rst $($Cfg.WEBUI_PORT) $want"
 
     # Start Moonlight in the background as soon as Sunshine answers.
     if (-not $NoStream) {
-        $job = Start-Job -ArgumentList $Cfg.TARGET, $moonlight, $Cfg.MOONLIGHT_APP -ScriptBlock {
-            param($Ip, $Exe, $App)
+        $mlArgs = Get-SrMoonlightArgs
+        if ($mlArgs.Count) { Write-SrInfo "Moonlight will use: $($mlArgs -join ' ')" }
+        $job = Start-Job -ArgumentList $Cfg.TARGET, $moonlight, $Cfg.MOONLIGHT_APP, $mlArgs -ScriptBlock {
+            param($Ip, $Exe, $App, $Opts)
             $deadline = (Get-Date).AddMinutes(5)
             while ((Get-Date) -lt $deadline) {
                 $c = New-Object Net.Sockets.TcpClient
                 try { $up = $c.ConnectAsync($Ip, 47989).Wait(1000) -and $c.Connected } catch { $up = $false } finally { $c.Dispose() }
-                if ($up) { Start-Sleep -Seconds 3; Start-Process -FilePath $Exe -ArgumentList @('stream', $Ip, "`"$App`""); return }
+                if ($up) { Start-Sleep -Seconds 3; Start-Process -FilePath $Exe -ArgumentList (@('stream') + @($Opts) + @($Ip, "`"$App`"")); return }
                 Start-Sleep -Seconds 1
             }
         }
     }
 
-    Write-SrInfo 'Logging in: your key passphrase, then the Steam Machine password'
+    Write-SrInfo 'Logging in: your key passphrase, then the Steam Machine password (unless you chose key-only logins)'
     & ssh.exe -t -o "HostName=$($Cfg.TARGET)" -o ExitOnForwardFailure=yes -L "127.0.0.1:$($Cfg.WEBUI_PORT):127.0.0.1:47990" $Cfg.HOST_ALIAS $command
     $rc = $LASTEXITCODE
     if ($rc -eq 255) { Write-SrWarn "The SSH connection failed or dropped. If it mentions port $($Cfg.WEBUI_PORT), another window is using it. See docs/troubleshooting.md." }

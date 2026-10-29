@@ -30,6 +30,7 @@ steam-ssh /home/.steam-remote/steam-remote-server.sh --check
 - [Black picture](#black-picture)
 - [Displays](#displays)
 - [After a SteamOS update](#after-a-steamos-update)
+- [macOS-specific](#macos-specific)
 - [Windows-specific](#windows-specific)
 - [Host key changed](#host-key-changed)
 
@@ -120,8 +121,11 @@ Last resort: `sudo /home/.steam-remote/steam-remote-server.sh --uninstall --keep
 | Log: `bwrap: Can't find source path /run/user/1000/pulse/native` | Audio not reachable, usually nobody logged in on the Steam Machine yet | Let it reach Game Mode or Desktop Mode, then `steam-connect restart` |
 | Log: `Failed to gain CAP_SYS_ADMIN` / `Flatpak do not support KMS capture` | The sandbox copy isn't in use | Re-apply: `steam-ssh sudo /home/.steam-remote/steam-remote-server.sh`. Check `FLATPAK_BWRAP` is in `systemctl cat steam-remote-sunshine.service` |
 | Log: `Unable to find display or encoder` | No active output when Sunshine started | See [Displays](#displays) |
-| Washed-out colours, or a stall when Game Mode switches HDR | HDR is on in Game Mode but off in Moonlight | Turn on **Enable HDR** in Moonlight, and HDR for your monitor |
-| Stutter or blockiness | Bitrate too high for the network, or Wi-Fi | Lower Moonlight's bitrate; use Ethernet |
+| Washed-out colours, or a stall when Game Mode switches HDR | HDR is on in Game Mode but off in Moonlight | Turn on **Enable HDR** in Moonlight, and HDR for your monitor. More in [quality.md](quality.md#colours-look-wrong) |
+| `streaming in SDR` when you wanted HDR | One link in the HDR chain is missing | The message says which side; follow [the HDR checklist](quality.md#hdr) |
+| Soft or blurry picture | The Steam Machine's resolution on the dummy plug doesn't match Moonlight's, or the bitrate is low | [quality.md](quality.md#quick-checklist) |
+| Stream check: `Encoder: software` | Sunshine couldn't use the graphics card's encoder | `steam-connect restart`. If it stays, update Sunshine (guide, *Updating*) and read its log: `steam-ssh journalctl -u steam-remote-sunshine.service -b --no-pager -o cat` |
+| Stutter or blockiness | Bitrate too high for the network, or Wi-Fi | Lower the bitrate (`steam-remote-setup quality`, or Moonlight's settings); use Ethernet. [Moonlight's stats](quality.md#reading-moonlights-stats) show which |
 | Web UI says `Unauthorized`, or its login page keeps coming back | Wrong username, or a browser quirk | The username is what you set with `steam-pair login` (default `sunshine`). Use `steam-pair` instead of the browser |
 | Sunshine stops by itself mid-session | The idle timer saw no stream traffic for `IDLE_MINUTES` | Only happens with no stream running. Raise `IDLE_MINUTES` or set it to `0` (guide, *Changing things later*) |
 
@@ -129,13 +133,13 @@ Last resort: `sudo /home/.steam-remote/steam-remote-server.sh --uninstall --keep
 
 The stream connects but shows black, and Sunshine's log fills with `Couldn't get drm fb for plane`.
 
-This is a bug in Sunshine 2026.906 and later in Game Mode (LizardByte/Sunshine #5839). `steam-connect` works around it when `BLACK_SCREEN_FIX="yes"` (the default). If it's still black:
+This is a Sunshine problem in Game Mode (2026.906 and later, LizardByte/Sunshine #5839). `steam-connect` works around it with the Game Mode capture fix when `BLACK_SCREEN_FIX="yes"` (the default). If it's still black:
 
 1. In Moonlight, quit the stream (Ctrl+Alt+Shift+Q) and click **Desktop** again.
-2. If it still happens, check the workaround applied. Connect should print `Applied the Game Mode black-screen workaround`. It needs Game Mode to be running.
-3. In Desktop Mode, the bug doesn't happen.
+2. Check the stream check says `capture fix on`. It only applies in Game Mode, so if the Steam Machine was still starting up, run `steam-connect restart`.
+3. Update Sunshine (guide, *Updating*). In Desktop Mode, the problem doesn't happen.
 
-Once a fixed Sunshine ships, set `BLACK_SCREEN_FIX="no"` in your config, because the workaround costs a little GPU time.
+Keep `BLACK_SCREEN_FIX="yes"` even once Sunshine fixes this: the same fix is what gets Steam's menus and correct HDR colours into the stream ([quality.md](quality.md#hdr)).
 
 ## Displays
 
@@ -146,7 +150,7 @@ Once a fixed Sunshine ships, set `BLACK_SCREEN_FIX="no"` in your config, because
 | The TV stays dark after disconnecting | The disconnect didn't reach the Steam Machine (PC crash, network drop). Linux: `steam-connect disconnect`. Any PC: `steam-ssh sudo /home/.steam-remote/steam-remote-server.sh --boot-display`. Or wait for the idle timer, or reboot the Steam Machine |
 | The wrong screen goes dark | Stream and TV outputs are swapped. Run `steam-remote-setup displays` |
 | `NOTE output ... doesn't exist now` | An update renamed the outputs (e.g. `card0` to `card1`). Run `steam-remote-setup displays` |
-| Low resolution or no HDR on the stream | The dummy plug's EDID doesn't offer it. See [displays.md](displays.md#hdr-and-4k) |
+| Low resolution or no HDR on the stream | The dummy plug's EDID doesn't offer it. The stream check's first line shows what it offers. See [displays.md](displays.md#hdr-and-4k) |
 
 ## After a SteamOS update
 
@@ -161,6 +165,16 @@ To see what was restored at the last boot:
 ```sh
 steam-ssh "journalctl -u steam-remote-heal.service -b --no-pager -o cat"
 ```
+
+## macOS-specific
+
+| Symptom | Fix |
+| --- | --- |
+| `No route to host` or timeouts, though the Steam Machine is on | macOS 15+ blocks apps from your local network until you allow them: **System Settings > Privacy & Security > Local Network**, turn on Terminal (and Moonlight) |
+| `python3` asks to install the Command Line Tools | Let it, or run `xcode-select --install`. Wake-on-LAN, `steam-pair` and the clean disconnect when you close the window need it |
+| `steam-connect: command not found` | `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile && source ~/.zprofile` |
+| Double-clicking a launcher says it can't be opened | Right-click it > **Open** once, or run `chmod +x ~/Applications/Steam*.command` |
+| Moonlight doesn't open | It must be in `/Applications` or `~/Applications`. Connect with `steam-connect nostream` and open Moonlight by hand |
 
 ## Windows-specific
 

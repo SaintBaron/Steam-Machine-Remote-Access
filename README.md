@@ -31,12 +31,12 @@ Each guide takes 30 to 45 minutes, including about 10 minutes at the Steam Machi
 - It wakes the Steam Machine from sleep when you connect at home (Wake-on-LAN).
 - It repairs itself after SteamOS updates.
 - Optionally, you can connect from anywhere through a VPN. Nothing is ever port-forwarded.
-- Works in Game Mode and Desktop Mode, including HDR.
+- Works in Game Mode and Desktop Mode, including HDR. Each connection checks what the stream can do and tells you whether you got HDR.
 
 ## Is it safe?
 
 - Only your PC can connect. Every other device on your network is blocked by a firewall on the Steam Machine.
-- Every login needs your SSH key **and** the Steam Machine's password. Root logins are off.
+- Every login needs your SSH key **and** the Steam Machine's password (or, if you choose, the key alone). Root logins are off.
 - Streams are encrypted and only go to Moonlight on devices you've paired.
 - Nothing is reachable from the internet. Remote access only works through a VPN you control.
 
@@ -44,6 +44,7 @@ The details and trade-offs are in [docs/security.md](docs/security.md).
 
 ## Help and reference
 
+- [Picture quality and HDR](docs/quality.md): the sharpest stream, and HDR from end to end
 - [Displays and dummy plugs](docs/displays.md): which plugs and adapters work, and how the switching works
 - [Remote access](docs/remote-access.md): streaming from outside your home
 - [Troubleshooting](docs/troubleshooting.md)

@@ -73,10 +73,12 @@ How to tell active from passive: listings for active adapters usually say *activ
 The stream can only be as good as the dummy plug's EDID:
 
 - For **4K**, pick a dummy plug that advertises 3840x2160. Many cheap ones top out at 1080p or 4K 30 Hz.
-- For **HDR**, the dummy plug must advertise HDR (HDR10 metadata in its EDID). Look for "HDR" in the listing, or plugs sold for game streaming. Without it, Game Mode won't enable HDR on that output, and Moonlight gets SDR.
+- For **HDR**, the dummy plug must advertise HDR in its EDID: HDR10 (PQ) and BT.2020 colours. Game Mode needs both. Look for "HDR" in the listing, or plugs sold for game streaming. Without it, Game Mode won't enable HDR on that output, and Moonlight gets SDR.
 - Match Moonlight's resolution and frame rate to something the plug supports, or Sunshine scales the picture.
 
-To see what the dummy plug advertises, run this with it as the active output (connected and in use):
+`steam-connect` prints a **stream check** before Moonlight opens. Its first line is what the dummy plug offers, for example `Stream output HDMI-A-1: up to 3840x2160 at 120 Hz, HDR10`. `no HDR` there means the plug can't do HDR. [quality.md](quality.md) covers the rest of the picture settings and the HDR checklist.
+
+To list every mode the dummy plug advertises, run this with it as the active output (connected and in use):
 
 ```bash
 head -n 5 /sys/class/drm/card0-HDMI-A-1/modes      # use your stream output's name

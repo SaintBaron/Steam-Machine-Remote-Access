@@ -4,7 +4,7 @@ Every file, service, command and setting, for when you want to know exactly what
 
 ## Commands on your PC
 
-| Linux | Windows | What it does |
+| Linux and macOS | Windows | What it does |
 | --- | --- | --- |
 | `steam-connect` | *Steam Machine - Connect* | Wake, log in, start Sunshine, stream. Press **Q** to end |
 | `steam-connect restart` | `steam-connect.ps1 -Restart` | Same, restarting Sunshine first |
@@ -16,13 +16,15 @@ Every file, service, command and setting, for when you want to know exactly what
 | `steam-remote-setup displays` | `steam-remote-setup.ps1 displays` | Choose the stream and TV outputs again |
 | `steam-remote-setup remote` | `steam-remote-setup.ps1 remote` | Remote access on or off, or change VPN addresses |
 | `steam-remote-setup remote off` | `steam-remote-setup.ps1 remote off` | Remote access off for every PC |
+| `steam-remote-setup auth` | `steam-remote-setup.ps1 auth` | What a login needs: key and password (default), or key only ([security.md](security.md#key-only-logins)) |
+| `steam-remote-setup quality` | `steam-remote-setup.ps1 quality` | Stream resolution, frame rate, bitrate, codec, HDR and the encoder preset ([quality.md](quality.md)) |
 | `steam-remote-setup check` | `steam-remote-setup.ps1 check` | Report problems on the Steam Machine |
 | `steam-remote-setup update-server` | `steam-remote-setup.ps1 update-server` | Send this version's server script and apply it |
 | `steam-remote-setup add-client IP KEY.pub` | `steam-remote-setup.ps1 add-client IP KEY.pub` | Allow another PC |
 | `steam-remote-setup remove-client IP` | `steam-remote-setup.ps1 remove-client IP` | Stop allowing a PC |
 | `steam-remote-setup uninstall-server` | `steam-remote-setup.ps1 uninstall-server` | Remove everything from the Steam Machine |
 
-Every Linux command has `--help` and `--version`.
+Every Linux and macOS command has `--help` and `--version`.
 
 ## On the Steam Machine
 
@@ -33,7 +35,7 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `/home/.steam-remote/steam-remote-server.sh` | The server script. It installs, repairs, checks and uninstalls everything below |
 | `/home/.steam-remote/config` | Steam Machine settings (see below) |
 | `/home/.steam-remote/sunshine-backup/` | A copy of Sunshine's settings, login and pairing (root-only), restored if an update resets `/root`. Delete it too if you want to reset Sunshine |
-| `/etc/ssh/sshd_config.d/10-steam-remote.conf` | SSH lockdown |
+| `/etc/ssh/sshd_config.d/10-steam-remote.conf` | SSH lockdown (follows `AUTH_MODE`) |
 | `/etc/ssh/sshd_config` | Gets an `Include /etc/ssh/sshd_config.d/*.conf` line at the top if missing |
 | `/etc/steam-remote-guard.nft` | Firewall rules (nftables table `inet steam_remote`) |
 | `/etc/sudoers.d/zz-steam-remote` | The narrow sudo rule |
@@ -51,7 +53,7 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `steam-remote-guard.service` | yes | Loads the firewall |
 | `steam-remote-display.service` | yes | Starts on the TV: turns the stream output off before the display manager starts |
 | `steam-remote-idle.timer` / `.service` | yes (unless `IDLE_MINUTES=0`) | Every 5 minutes: if Sunshine runs and no stream traffic arrived for `IDLE_MINUTES`, stops it and switches back to the TV |
-| `steam-remote-sunshine.service` | **no** (on demand) | Sunshine itself, as root with KMS capture. Started and stopped by the client scripts |
+| `steam-remote-sunshine.service` | **no** (on demand) | Sunshine itself, as root with KMS capture. Started and stopped by the client scripts. When it stops, it undoes the Game Mode capture fix (`--composite off`, run as your user) |
 
 ### `steam-remote-server.sh`
 
@@ -66,6 +68,12 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `--remove-client IP` | yes | Stop allowing a PC (refuses to remove the last one) |
 | `--remote-add ADDRESS` / `--remote-remove ADDRESS` | yes | Allow or stop allowing a PC's VPN address (can be repeated) |
 | `--set-remote "ADDRESSES"` / `--set-remote off` | yes | Replace the whole remote list; `off` turns remote access off for every PC |
+| `--set-encoder quality\|balanced\|speed\|auto` | yes | Set the encoder preset (`ENCODER_QUALITY`) and apply it |
+| `--set-auth key+password\|key` | yes | Set what an SSH login needs (`AUTH_MODE`) and apply it |
+| `--auth-mode` | no | Print the login mode: `key+password` or `key` |
+| `--stream-info` | no | The stream check: what the stream output offers, Game Mode's HDR state, the encoder, and whether HDR can work |
+| `--stream-watch [SECONDS]` | no | Wait (default 300 seconds) for a stream to start, then say whether it's SDR or HDR |
+| `--composite on\|off` | no | Turn the Game Mode capture fix on, or put back what was there before. Does nothing in Desktop Mode |
 | `--uninstall [--keep-sunshine] [--keep-ssh]` | yes | Remove everything; by default also uninstalls Sunshine and turns SSH off |
 | `--boot-display` | yes | Switch to the TV now (what the boot service runs) |
 | `--idle-check` | yes | One idle-timer check |
@@ -85,21 +93,25 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `IDLE_MINUTES` | `60` | Stop Sunshine after this long with no stream traffic. `0` = never |
 | `SUNSHINE_NAME` | `steam-machine` | Name shown in Moonlight |
 | `WAKE_ON_LAN` | `yes` | Keep magic-packet Wake-on-LAN on for wired connections |
+| `AUTH_MODE` | `key+password` | What an SSH login needs: `key+password`, or `key` (the SSH key only). Anything else counts as `key+password`. See [security.md](security.md#key-only-logins) |
+| `ENCODER_QUALITY` | `quality` | The video encoder's preset: `quality`, `balanced`, `speed` or `auto` (the driver's default). Needs Sunshine 2026.906 or later. See [quality.md](quality.md#the-encoder-preset) |
 
 Values are parsed and validated, never run as code. After editing, apply with `sudo /home/.steam-remote/steam-remote-server.sh`. A fully commented example is in [server/config.example](../server/config.example).
 
-## On a Linux PC
+## On a Linux PC or a Mac
 
 | Path | What it is |
 | --- | --- |
 | `~/.local/bin/steam-connect`, `steam-ssh`, `steam-pair`, `steam-remote-setup` | The commands |
 | `~/.local/share/steam-remote/lib.sh` | Code shared by the commands |
 | `~/.local/share/steam-remote/server/steam-remote-server.sh` | The server script that setup sends to the Steam Machine |
-| `~/.local/share/applications/steam-remote-*.desktop` | App-menu launchers |
-| `~/.local/share/icons/hicolor/scalable/apps/steam-remote-*.svg` | Their icons |
+| `~/.local/share/applications/steam-remote-*.desktop` | App-menu launchers (Linux) |
+| `~/Applications/Steam Machine - Connect.command`, `... - SSH.command` | Double-click launchers (macOS) |
+| `~/.local/share/icons/hicolor/scalable/apps/steam-remote-*.svg` | Their icons (Linux) |
 | `~/.config/steam-remote/config` | This PC's settings (`0600`) |
 | `~/.config/steam-remote/mac` | The Steam Machine's learned MAC address |
 | `~/.local/state/steam-remote/disconnect.log` | Output of disconnects done after the window was closed |
+| `~/.local/state/steam-remote/moonlight.log` | Moonlight's messages from the last stream `steam-connect` started |
 | `~/.ssh/steam-machine_ed25519` (+ `.pub`) | The SSH key (default name) |
 | `~/.ssh/config` | The `Host steam-machine` block between `# >>> steam-machine-remote >>>` markers |
 | `~/.ssh/cm-steam-machine` | The shared-login socket, while connected |
@@ -138,7 +150,13 @@ Values are parsed and validated, never run as code. After editing, apply with `s
 | `WEBUI_PORT` | `47990` | Local port for the web UI tunnel |
 | `PERSIST` | `2h` | Linux: the shared login closes after this long unused |
 | `KEEPALIVE` | `600` | Linux: seconds between keep-alive checks while connected |
-| `BLACK_SCREEN_FIX` | `yes` | Work around Sunshine's Game Mode black-screen bug |
+| `BLACK_SCREEN_FIX` | `yes` | The Game Mode capture fix while streaming: avoids a black stream, missing menus and wrong HDR colours. Keep it on |
+| `STREAM_RESOLUTION` | empty | Passed to Moonlight, e.g. `3840x2160`. Empty = Moonlight's own setting |
+| `STREAM_FPS` | empty | Passed to Moonlight, e.g. `60` or `120` |
+| `STREAM_BITRATE` | empty | Bitrate in Mbps at home |
+| `STREAM_BITRATE_AWAY` | `20` | Bitrate in Mbps when connected through the VPN. Empty = same as at home |
+| `STREAM_CODEC` | empty | `auto`, `HEVC`, `AV1` or `H.264` |
+| `STREAM_HDR` | empty | `yes` or `no`. Empty = Moonlight's own **Enable HDR** |
 
 A fully commented example is in [config.example](../config.example).
 

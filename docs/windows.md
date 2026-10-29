@@ -1,6 +1,6 @@
 # Setup guide: Windows 10 and 11
 
-This guide sets up [Steam Machine Remote Access](https://github.com/SaintBaron/Steam-Machine-Remote-Access) with this PC as the client. Other guides: [Arch](arch.md), [Debian/Ubuntu](debian.md).
+This guide sets up [Steam Machine Remote Access](https://github.com/SaintBaron/Steam-Machine-Remote-Access) with this PC as the client. Other guides: [Arch](arch.md), [Debian/Ubuntu](debian.md), [macOS](macos.md).
 
 When you finish, this PC can wake the Steam Machine, stream it in Moonlight and open a terminal on it, all from one command or shortcut. No other device on your network can log in to it or stream from it.
 
@@ -223,11 +223,13 @@ Open Moonlight > **Settings** (gear icon):
 | Setting | Value | Why |
 | --- | --- | --- |
 | Resolution / FPS | Your monitor's, e.g. 1440p 60 or 4K 60 | Match what you'll watch it on |
-| Video bitrate | 40 to 80 Mbps (wired), 20 to 30 (Wi-Fi) | Higher is sharper, if the network keeps up |
+| Video bitrate | 60 to 150 Mbps (wired), 30 to 60 (Wi-Fi) | Higher is sharper, if the network keeps up |
 | Video codec | HEVC (or AV1 if your GPU decodes it) | Better quality per Mbps |
-| **Enable HDR** | On, if your monitor does HDR | Game Mode streams in HDR; without this, colours look washed out |
+| **Enable HDR** | On, if your monitor does HDR | Without it, HDR games look washed out. [The HDR checklist](quality.md#hdr) has the rest |
 
 For HDR, also turn on **Use HDR** for your monitor in **Settings > System > Display**.
+
+You can also keep these in the project's own settings instead: the setup in Part 4 offers to (step 3), or run `steam-remote-setup.ps1 quality` later. Then Connect hands them to Moonlight each time, and lowers the bitrate automatically when you're away from home. [quality.md](quality.md) explains every setting.
 
 ## Part 4: Run the setup
 
@@ -238,6 +240,14 @@ The setup is safe to run again at any point. It keeps what's already done, and i
 ### Step 1: This PC's settings
 
 It asks for the Steam Machine's IP (`STEAM_MACHINE_IP` from Part 2), its user name (press Enter for `deck`) and a short SSH name (press Enter for `steam-machine`). These are saved in `%APPDATA%\steam-remote\config`. Every option is explained in [config.example](../config.example).
+
+Then it shows the less common settings and asks whether to change them. Press Enter to keep them:
+
+- **Moonlight app** (default `Desktop`, the whole screen): another Sunshine app if you've added one.
+- **Game Mode capture fix** (default `yes`): keeps the stream from going black in Game Mode, and keeps Steam's menus and HDR colours right. Leave it on.
+- **Wake wait** (default 90 seconds): how long Connect waits for the Steam Machine to wake.
+- **Wake-on-LAN broadcast** (default automatic, the `.255` address): set it only if your home network is bigger than a `/24`.
+- **Name in Sunshine** (default this computer's name): how this PC appears in Sunshine's paired-devices list.
 
 ### Step 2: Remote access (optional)
 
@@ -252,13 +262,17 @@ It asks whether this PC may also connect from **outside your home**, through a V
 
 If you're not sure, press Enter for **1**. You can change it any time with `steam-remote-setup.ps1 remote`. Options 2 to 4 ask for this PC's address on the VPN (and, for Tailscale, the Steam Machine's). You can leave the addresses empty and add them later. [remote-access.md](remote-access.md) explains each option and how to set up the VPN. Nothing is ever opened to the internet directly.
 
-### Step 3: SSH key and SSH config
+### Step 3: Stream quality (optional)
+
+It shows the stream settings that Connect hands to Moonlight on every connection. At first that's Moonlight's own settings, plus 20 Mbps when you connect through the VPN. Press Enter to keep them, or **y** to set the resolution, frame rate, bitrate, codec and HDR now. [quality.md](quality.md#stream-settings) suggests values. You can change them any time with `steam-remote-setup.ps1 quality`.
+
+### Step 4: SSH key and SSH config
 
 It creates an SSH key at `%USERPROFILE%\.ssh\steam-machine_ed25519` and asks for a **passphrase**. Choose a good one and save it in your password manager: logins need this passphrase **and** the Steam Machine's password. If you already have a key there, it's reused.
 
 It also adds a `Host steam-machine` block to the top of `%USERPROFILE%\.ssh\config`, between `# >>> steam-machine-remote >>>` markers. This is what makes `ssh steam-machine` work. Its `HostKeyAlias` line lets SSH recognise the Steam Machine at either its home or its VPN address. If you already had your own `Host steam-machine` entry, it's left alone and the setup tells you what it should contain.
 
-### Steps 4 and 5: First connection
+### Steps 5 and 6: First connection
 
 The first time, SSH shows a fingerprint and asks:
 
@@ -272,7 +286,7 @@ Are you sure you want to continue connecting (yes/no/[fingerprint])?
 
 Then enter the Steam Machine's **password**. This copies the server script and your public key across.
 
-### Step 6: Setting up the Steam Machine
+### Step 7: Setting up the Steam Machine
 
 It logs in again (password), then **sudo** asks for the same password once more. From here the Steam Machine's side runs (`steam-remote-server.sh --setup`):
 
@@ -290,9 +304,17 @@ It logs in again (password), then **sudo** asks for the same password once more.
    - **TV output:** type the number of the output your **TV or monitor** is on. It's turned off while you stream and back on when you disconnect. Type **0** if there's no TV.
    - Not sure? Unplug one of them, type **r** to refresh, and see which line changes. Plug it back in afterwards.
    - Switching only happens when both are set. Change them any time with `steam-remote-setup displays`. [displays.md](displays.md) explains the options.
-3. **Sunshine** is installed from Flathub (system-wide) if it isn't already. This takes a few minutes the first time.
-4. **Applying.** It writes the SSH lockdown, firewall, Sunshine service, sudo rule, boot and idle services, and Wake-on-LAN, and turns on the self-heal service. Each file it writes is listed.
-5. **Checks.** You should see:
+3. **Options.** Press Enter to keep each default:
+   - **Idle stop** (default 60 minutes): if a PC forgets to disconnect, Sunshine is stopped after this long with nobody streaming. 0 turns it off.
+   - **Wake-on-LAN** (default on): lets Connect wake the Steam Machine from sleep.
+   - **Name** (default `steam-machine`): what Moonlight shows.
+   - **Encoder preset** (default `quality`): the sharpest picture. Choose `balanced` if you'll stream 4K at 120 FPS, `speed` for the lowest delay, or `auto` for the graphics driver's default. See [quality.md](quality.md#the-encoder-preset).
+   - **Login** (default `key+password`): every SSH login needs your key **and** the Steam Machine's password. `key` needs only the key, so one passphrase (or none, once your PC remembers it). Only choose `key` if your key has a strong passphrase. [security.md](security.md#key-only-logins) explains the trade-off; change it later with `steam-remote-setup.ps1 auth`.
+
+   Change them later by running the setup again, or the preset alone with `steam-remote-setup.ps1 quality`.
+4. **Sunshine** is installed from Flathub (system-wide) if it isn't already. This takes a few minutes the first time.
+5. **Applying.** It writes the SSH lockdown, firewall, Sunshine service, sudo rule, boot and idle services, and Wake-on-LAN, and turns on the self-heal service. Each file it writes is listed.
+6. **Checks.** You should see:
 
    ```
    ==> Checking
@@ -307,11 +329,11 @@ It logs in again (password), then **sudo** asks for the same password once more.
    During the Sunshine test, the TV goes dark for a few seconds if you set up switching.
 
 > [!IMPORTANT]
-> From now on, every SSH login needs **both** your key (passphrase) and the password, from this PC only. Logins already open stay connected.
+> From now on, every SSH login needs **both** your key (passphrase) and the password, from this PC only (or just the key, if you chose `key`). Logins already open stay connected.
 
-### Step 7: Check a fresh login
+### Step 8: Check a fresh login
 
-It opens one more connection the new way: key passphrase, then password. Then it prints `key and password accepted`. If it does, the setup is done.
+It opens one more connection the new way: key passphrase, then password. Then it prints `key and password accepted` (or `key accepted`, with key-only logins). If it does, the setup is done.
 
 ## Part 5: Pair Moonlight
 
@@ -343,6 +365,18 @@ You pair once per PC. You'd only pair again after unpairing in the web UI or rei
 ### Stream
 
 Click **Steam Machine - Connect** on your desktop (or run `steam-connect.ps1`). It logs in, switches to the dummy plug (the TV goes dark), starts Sunshine and opens Moonlight on the **Desktop** app. Put the Steam Machine in **Game Mode** for the full experience.
+
+Before Moonlight opens, a **Stream check** shows what the dummy plug offers and whether HDR is ready, for example:
+
+```text
+==> Stream check
+    Stream output HDMI-A-1: up to 3840x2160 at 120 Hz, HDR10
+    Game Mode: HDR on, capture fix on
+    Encoder: vaapi, preset quality, AV1 available
+    HDR: ready. Turn on Enable HDR in Moonlight to use it
+```
+
+When Moonlight connects, you'll see `Moonlight connected: streaming in HDR (10-bit)` or `... in SDR`, with what to change if HDR didn't happen. [quality.md](quality.md) explains each line.
 
 - In Moonlight, **Ctrl+Alt+Shift+Q** quits the stream; **Ctrl+Alt+Shift+Z** releases the mouse and keyboard.
 - To finish, press **Q** in the Connect window. Sunshine stops and the TV gets its picture back. Closing the window or pressing **Ctrl+C** does the same.
@@ -391,14 +425,6 @@ steam-ssh.ps1 'sudo -n true 2>/dev/null && echo PROBLEM: passwordless sudo || ec
 
 You want `OK`, `OK` and `All present.`
 
-**4. HDR** (if you turned it on). With a stream running and the Steam Machine in Game Mode:
-
-```powershell
-steam-ssh.ps1 "sudo journalctl -u steam-remote-sunshine.service -b --no-pager -o cat | grep -E 'Color coding|Color depth' | tail -n 2"
-```
-
-You want `HDR (Rec. 2020 + SMPTE 2084 PQ)` and `10-bit`. `SDR` / `8-bit` means Moonlight's **Enable HDR** is off, HDR is off in Game Mode, or the dummy plug's EDID doesn't advertise HDR (see [displays.md](displays.md#hdr-and-4k)).
-
 </details>
 
 ## After setup
@@ -414,11 +440,12 @@ You want `HDR (Rec. 2020 + SMPTE 2084 PQ)` and `10-bit`. `SDR` / `8-bit` means M
 | **Steam Machine - SSH** / `steam-ssh.ps1` | A terminal on the Steam Machine (wakes it first) |
 | `steam-ssh.ps1 <command>` | Run one command there, e.g. `steam-ssh.ps1 uptime` |
 | `steam-pair.ps1 -Login` / `steam-pair.ps1` | Create or change the web UI login / pair Moonlight |
+| `steam-remote-setup.ps1 quality` | Stream resolution, bitrate, codec, HDR and the encoder preset |
 | **Steam Machine - Setup** / `steam-remote-setup.ps1` | First-time setup; safe to re-run |
 
 **How disconnecting works on Windows.** Windows' SSH can't share one login between commands, so the Connect window *is* the login. A small script runs on the Steam Machine for as long as that window is connected. When the connection ends, for any reason (Q, Ctrl+C, closing the window, the PC crashing, the network dropping), that script stops Sunshine and switches back to the TV. This PC then closes Moonlight. While Connect is open, the **SSH** shortcut makes its own login, so it asks for your passphrase and password again.
 
-**Fewer passphrase prompts:** let Windows remember your key's passphrase until you log out. In an **administrator** PowerShell run `Get-Service ssh-agent | Set-Service -StartupType Manual; Start-Service ssh-agent`. Then, in a normal PowerShell, run `ssh-add $HOME\.ssh\steam-machine_ed25519`. The Steam Machine's password is still asked every time; that's the second factor working.
+**Fewer passphrase prompts:** let Windows remember your key's passphrase until you log out. In an **administrator** PowerShell run `Get-Service ssh-agent | Set-Service -StartupType Manual; Start-Service ssh-agent`. Then, in a normal PowerShell, run `ssh-add $HOME\.ssh\steam-machine_ed25519`. The Steam Machine's password is still asked every time; that's the second factor working. If you'd rather type one passphrase, see [key-only logins](security.md#key-only-logins).
 
 **Sunshine never runs on its own.** It starts when you connect and stops when you disconnect. If you forget to disconnect, the Steam Machine stops it after 60 minutes with nobody streaming and switches back to the TV (change this with `IDLE_MINUTES`, see below).
 
@@ -439,6 +466,24 @@ steam-remote-setup.ps1 displays
 
 It shows the outputs table again and asks for the stream and TV outputs. The sudo rule follows the new choice automatically.
 
+### Login: key and password, or key only
+
+```powershell
+steam-remote-setup.ps1 auth
+```
+
+Key and password is the default. Key only means one passphrase to type, at the cost described in [security.md](security.md#key-only-logins). It refuses if your key has no passphrase.
+
+### Picture quality
+
+Resolution, frame rate, bitrate (at home and away), codec, HDR, and the Steam Machine's encoder preset:
+
+```powershell
+steam-remote-setup.ps1 quality
+```
+
+[quality.md](quality.md) explains each one, and how to get HDR working.
+
 ### Remote access
 
 Turn streaming from outside your home on or off, or change the VPN addresses:
@@ -457,7 +502,7 @@ All of them are in `%APPDATA%\steam-remote\config`, with comments. [config.examp
 notepad $env:APPDATA\steam-remote\config
 ```
 
-Useful ones: `MOONLIGHT_APP` (another Sunshine app instead of `Desktop`), `BROADCAST` (if your network isn't a `/24`, so Wake-on-LAN reaches it), `BLACK_SCREEN_FIX` (turn it off once Sunshine fixes the bug). If you change `MACHINE_IP`, `MACHINE_USER` or `HOST_ALIAS`, run `steam-remote-setup.ps1` again.
+Useful ones: `MOONLIGHT_APP` (another Sunshine app instead of `Desktop`), `BROADCAST` (if your network isn't a `/24`, so Wake-on-LAN reaches it), `STREAM_*` (what `steam-remote-setup.ps1 quality` sets). If you change `MACHINE_IP`, `MACHINE_USER` or `HOST_ALIAS`, run `steam-remote-setup.ps1` again.
 
 ### The Steam Machine's settings
 
@@ -467,7 +512,7 @@ They're in `/home/.steam-remote/config` on the Steam Machine (root-owned); [serv
 steam-ssh.ps1 'sudo nano /home/.steam-remote/config && sudo /home/.steam-remote/steam-remote-server.sh'
 ```
 
-Useful ones: `IDLE_MINUTES` (0 turns the idle timer off), `SUNSHINE_NAME` (the name Moonlight shows), `WAKE_ON_LAN`.
+Useful ones: `IDLE_MINUTES` (0 turns the idle timer off), `SUNSHINE_NAME` (the name Moonlight shows), `WAKE_ON_LAN`, `ENCODER_QUALITY` (the encoder preset).
 
 Be careful with `ALLOWED_IPS`. Removing this PC's address locks it out. The commands below are safer.
 
@@ -476,10 +521,10 @@ Be careful with `ALLOWED_IPS`. Removing this PC's address locks it out. The comm
 Each PC needs a **fixed IP** (Part 1) and its **own SSH key**. Logins are locked to known keys and addresses, so the new PC can't add itself; an existing PC adds it.
 
 1. **On the new PC:** install as in Part 3, then create its key without running the full setup yet:
-   - Linux: `ssh-keygen -t ed25519 -f ~/.ssh/steam-machine_ed25519`
+   - Linux or macOS: `ssh-keygen -t ed25519 -f ~/.ssh/steam-machine_ed25519`
    - Windows: `ssh-keygen -t ed25519 -f $HOME\.ssh\steam-machine_ed25519`
 
-   (If that says the folder doesn't exist, create it first: `mkdir -p ~/.ssh` on Linux, `mkdir -Force $HOME\.ssh` on Windows.) Copy its **public** key (the `.pub` file) to this PC however you like: USB stick, email or chat. It's public, so it isn't secret.
+   (If that says the folder doesn't exist, create it first: `mkdir -p ~/.ssh` on Linux or macOS, `mkdir -Force $HOME\.ssh` on Windows.) Copy its **public** key (the `.pub` file) to this PC however you like: USB stick, email or chat. It's public, so it isn't secret.
 2. **On this PC:**
 
    ```powershell
@@ -532,11 +577,11 @@ winget upgrade -e --id MoonlightGameStreamingProject.Moonlight
 - It also only works over Ethernet, and the wake packet won't cross routers or VLANs, so keep both machines on the same network.
 - By default Sunshine streams to one device at a time, and disconnecting on any PC stops Sunshine for everyone.
 - The TV goes dark while you're streaming (if switching is set up), because Game Mode only drives one display at a time.
-- If the stream is black in Game Mode, that's a Sunshine bug (2026.906 and later) that `BLACK_SCREEN_FIX` works around. Reconnecting in Moonlight usually sorts it; otherwise see [troubleshooting](troubleshooting.md#black-picture).
+- While you stream, Connect makes Game Mode draw everything onto one layer (the capture fix, `BLACK_SCREEN_FIX`). Without it the stream can be black, miss Steam's menus, or get HDR colours wrong. It's undone when Sunshine stops. If the stream is still black, see [troubleshooting](troubleshooting.md#black-picture).
 - Three wrong passwords locks the account for 10 minutes, sudo included. There's no way round it except waiting.
 - Don't press Ctrl+Z in a terminal running SSH. It pauses SSH in the background and it keeps hold of the web UI port. If you've done it, run `steam-connect disconnect` or close the terminal.
 - None of the scripts take passwords as arguments, so they won't end up in your shell history. Don't paste them into commands yourself either.
-- Desktop Mode streams fine too. The black-screen workaround only does anything in Game Mode.
+- Desktop Mode streams fine too. The capture fix only does anything in Game Mode. For HDR in Desktop Mode, turn on HDR for the dummy plug in the Steam Machine's *System Settings > Display & Monitor*.
 - Sunshine's web UI (`https://localhost:47990`) only works while Connect is open, since it goes through the SSH tunnel.
 - You don't need any Windows Firewall rules: every connection starts from this PC.
 - If you get "running scripts is disabled on this system" when running a `.ps1` by name, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once. The shortcuts don't need it.
