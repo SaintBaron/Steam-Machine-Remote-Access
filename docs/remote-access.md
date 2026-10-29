@@ -1,6 +1,6 @@
 # Remote access: streaming from outside your home
 
-**Do your OS guide first** ([Arch](arch.md), [Debian/Ubuntu](debian.md) or [Windows](windows.md)), then come back here.
+**Do your OS guide first** ([Arch](arch.md), [Debian/Ubuntu](debian.md), [macOS](macos.md) or [Windows](windows.md)), then come back here.
 
 Remote access works through a **VPN**, a private, encrypted link between your PC and your home. Nothing is opened to the internet, and every login still needs your key and password.
 
@@ -28,16 +28,16 @@ Remote access works through a **VPN**, a private, encrypted link between your PC
    | TP-Link | Archer: *Advanced* > *VPN Server*; Omada: *VPN* > **WireGuard** |
    | Others | Look for *VPN Server* in the router's settings |
 
-2. **Create a client for your PC** in the router's VPN settings and download its config file. On the PC, install the [WireGuard app](https://www.wireguard.com/install/) (or OpenVPN, if that's what the router uses) and import the file. On Linux, NetworkManager can import WireGuard `.conf` files too: *Settings* > *Network* > **+** > *Import from file*.
+2. **Create a client for your PC** in the router's VPN settings and download its config file. On the PC, install the [WireGuard app](https://www.wireguard.com/install/) (or OpenVPN, if that's what the router uses) and import the file. On Linux, NetworkManager can import WireGuard `.conf` files too: *Settings* > *Network* > **+** > *Import from file*. On macOS, use the WireGuard app from the App Store.
 3. **Note your PC's VPN address.** It's the `Address` line in the config file, for example `Address = 10.6.0.2/32`. You need the part before the `/`, here `10.6.0.2`.
 4. **Check the VPN reaches your home network.** Connect the VPN from outside your home (your phone's hotspot works), then ping the Steam Machine's normal home address. If there's no reply, make sure the client config's `AllowedIPs` line includes your home network (for example `192.168.0.0/24`), or is `0.0.0.0/0`.
 5. **Tell the Steam Machine about it**, while you're at home. Run the command below, choose **2**, and enter the address from step 3.
 
-   | Linux | Windows |
+   | Linux or macOS | Windows |
    | --- | --- |
    | `steam-remote-setup remote` | `steam-remote-setup.ps1 remote` |
 
-6. **Try it.** Away from home, connect the VPN, then run `steam-connect` (Linux) or click **Steam Machine - Connect** (Windows).
+6. **Try it.** Away from home, connect the VPN, then run `steam-connect` (Linux or macOS) or click **Steam Machine - Connect** (Windows).
 
 If it connects over ping but SSH times out, your router may be presenting VPN clients as its own address. This setting is often called *NAT* or *masquerade* for VPN clients; turn it off in the router's VPN settings. Don't enter the router's own address in step 5: that would let every VPN client in.
 
@@ -69,11 +69,11 @@ If it connects over ping but SSH times out, your router may be presenting VPN cl
 3. **Note both Tailscale addresses.** They start with `100.`. Run `tailscale ip -4` on each device, or check the *Machines* page in the [Tailscale admin console](https://login.tailscale.com/admin/machines).
 4. **Tell the Steam Machine about it.** Run the command below, choose **3**, and enter both addresses. If Tailscale is running on the PC, its address is filled in for you.
 
-   | Linux | Windows |
+   | Linux or macOS | Windows |
    | --- | --- |
    | `steam-remote-setup remote` | `steam-remote-setup.ps1 remote` |
 
-5. **Try it.** Away from home, make sure Tailscale is connected, then run `steam-connect` (Linux) or click **Steam Machine - Connect** (Windows).
+5. **Try it.** Away from home, make sure Tailscale is connected, then run `steam-connect` (Linux or macOS) or click **Steam Machine - Connect** (Windows).
 
 **After a SteamOS update**, check Tailscale is still running on the Steam Machine with `tailscale status`. If it isn't, run `cd ~/deck-tailscale && sudo bash tailscale.sh` again. This project's self-heal service can't repair Tailscale.
 

@@ -35,7 +35,7 @@
 set -u
 umask 022
 
-VERSION="1.0.1"
+VERSION="1.1.0"
 R="${STEAM_REMOTE_TEST_ROOT:-}"   # test prefix only; leave unset for real use
 
 KIT_REAL="/home/.steam-remote"

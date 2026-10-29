@@ -323,8 +323,13 @@ add_client() {
 case "${1:-}" in
   "")
     need ssh "Install OpenSSH (see the guide)."; need ssh-keygen "Install OpenSSH."; need scp "Install OpenSSH."
-    need setsid "Install util-linux."; need pgrep "Install procps."; need timeout "Install coreutils."; need ss "Install iproute2."
-    need python3 "Install python3."; need ip "Install iproute2."; need flock "Install util-linux."; need ping "Install iputils."
+    need python3 "Install python3 (macOS: xcode-select --install)."; need ping "Install iputils."; need pkill "Install procps."
+    if [ "$SR_OS" = Darwin ]; then
+      need nc "netcat should come with macOS."; need arp "arp should come with macOS."; need route "route should come with macOS."
+    else
+      need setsid "Install util-linux."; need timeout "Install coreutils."; need ss "Install iproute2."
+      need ip "Install iproute2."; need flock "Install util-linux."
+    fi
     [ -f "$SERVER_SRC" ] || die "Can't find $SERVER_SRC. Run the installer again."
     [ -n "$(moonlight_cmd)" ] || warn "Moonlight isn't installed yet. You'll need it to stream (see the guide)."
     config_wizard
@@ -344,10 +349,10 @@ case "${1:-}" in
       REMOTE_MODE=off; REMOTE_PC_IP=""; REMOTE_MACHINE_IP=""; write_config
     else
       remote_wizard
-      args=$(remote_args)
-      if [ -n "$args" ]; then
+      rargs=$(remote_args)
+      if [ -n "$rargs" ]; then
         # shellcheck disable=SC2086  # separate options on purpose
-        remote_sudo $args
+        remote_sudo $rargs
       else
         say "Nothing to change on the Steam Machine."
       fi

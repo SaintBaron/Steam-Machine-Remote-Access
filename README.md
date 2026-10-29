@@ -12,6 +12,7 @@ One command or shortcut wakes the Steam Machine, logs in, moves the picture onto
 | --- | --- |
 | Arch Linux, CachyOS, Manjaro, EndeavourOS | [Arch guide](docs/arch.md) |
 | Debian, Ubuntu, Linux Mint, Pop!_OS | [Debian/Ubuntu guide](docs/debian.md) |
+| macOS 12 Monterey or later | [macOS guide](docs/macos.md) |
 | Windows 10 or 11 | [Windows guide](docs/windows.md) |
 
 **2. Pick how you'll connect:**

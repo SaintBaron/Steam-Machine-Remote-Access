@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0 - 2026-10-29
+
+- macOS support (12 Monterey or later): the same commands as Linux, double-click launchers, and a macOS guide (`docs/macos.md`).
+- Fixed: closing the `steam-connect` window could, rarely, skip the automatic disconnect.
+
 ## 1.0.1 - 2026-10-29
 
 - SteamOS updates can no longer leave SSH open with SteamOS's default settings:

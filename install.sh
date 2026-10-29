@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# install.sh: install the Steam Machine Remote Access commands on a Linux PC
-# (Arch, CachyOS, Manjaro, EndeavourOS, Debian, Ubuntu, Linux Mint, Pop!_OS...).
+# install.sh: install the Steam Machine Remote Access commands on Linux or macOS
+# (Arch, CachyOS, Manjaro, EndeavourOS, Debian, Ubuntu, Linux Mint, Pop!_OS, macOS 12+).
 # https://github.com/SaintBaron/Steam-Machine-Remote-Access
 #
 #   curl -fsSL https://raw.githubusercontent.com/SaintBaron/Steam-Machine-Remote-Access/main/install.sh | bash
@@ -15,8 +15,9 @@
 # Installs, all inside your home folder (no root needed except for system packages):
 #   ~/.local/bin/                       steam-connect, steam-ssh, steam-pair, steam-remote-setup
 #   ~/.local/share/steam-remote/        shared code and the Steam Machine's server script
-#   ~/.local/share/applications/        app-menu launchers
-#   ~/.local/share/icons/hicolor/...    their icons
+#   ~/.local/share/applications/        app-menu launchers (Linux)
+#   ~/.local/share/icons/hicolor/...    their icons (Linux)
+#   ~/Applications/Steam Machine - *.command   double-click launchers (macOS)
 
 # shellcheck disable=SC2015,SC1091
 set -euo pipefail
@@ -32,6 +33,8 @@ APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor/scalable/apps"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/steam-remote"
 COMMANDS=(steam-connect steam-ssh steam-pair steam-remote-setup)
+MAC_APPS="$HOME/Applications"
+IS_MAC=0; [ "$(uname -s)" = Darwin ] && IS_MAC=1
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWarning:\033[0m %s\n' "$*" >&2; }
@@ -58,6 +61,7 @@ if [ "$ACTION" != install ]; then
   rm -rf "$SHARE"
   rm -f "$APPS/steam-remote-connect.desktop" "$APPS/steam-remote-ssh.desktop"
   rm -f "$ICONS/steam-remote-connect.svg" "$ICONS/steam-remote-ssh.svg"
+  rm -f "$MAC_APPS/Steam Machine - Connect.command" "$MAC_APPS/Steam Machine - SSH.command"
   [ "$ACTION" = purge ] && rm -rf "$CONFIG_DIR"
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" >/dev/null 2>&1 || true
   say "Removed the commands, launchers and icons."
@@ -96,8 +100,26 @@ case " ${ID:-} ${ID_LIKE:-} " in
   *" arch "*)                 family=arch ;;
   *" debian "*|*" ubuntu "*)  family=debian ;;
 esac
+[ "$IS_MAC" = 1 ] && family=mac
 
-if [ "$DEPS" = 1 ]; then
+if [ "$DEPS" = 1 ] && [ "$family" = mac ]; then
+  # macOS has ssh, nc, ping and friends built in. python3 comes with Apple's
+  # Command Line Tools (needed for Wake-on-LAN and steam-pair).
+  if ! xcode-select -p >/dev/null 2>&1; then
+    warn "python3 isn't installed yet. Install Apple's Command Line Tools (a few minutes), then run this installer again:"
+    echo "   xcode-select --install"
+  fi
+  for p in ssh scp ssh-keygen nc ping pkill awk route arp; do
+    command -v "$p" >/dev/null 2>&1 || warn "$p is missing. It normally comes with macOS."
+  done
+  if [ ! -d /Applications/Moonlight.app ] && [ ! -d "$HOME/Applications/Moonlight.app" ]; then
+    if command -v brew >/dev/null 2>&1 && ask_yes "Install Moonlight with Homebrew (brew install --cask moonlight)?"; then
+      brew install --cask moonlight
+    else
+      warn "Moonlight isn't installed. Download it from https://moonlight-stream.org and drag it into Applications."
+    fi
+  fi
+elif [ "$DEPS" = 1 ]; then
   case "$family" in
     arch)   pkgs=(openssh python iproute2 iputils util-linux procps-ng coreutils gawk findutils flatpak curl); cmd=(sudo pacman -S --needed --noconfirm) ;;
     debian) pkgs=(openssh-client python3 iproute2 iputils-ping util-linux procps coreutils findutils flatpak curl); cmd=(sudo apt-get install -y) ;;
@@ -128,12 +150,21 @@ if [ "$DEPS" = 1 ]; then
 fi
 
 # ------------------------------------------------------------------ install files
-mkdir -p "$BIN" "$SHARE/server" "$APPS" "$ICONS"
+mkdir -p "$BIN" "$SHARE/server"
 install -m 644 "$SRC/linux/lib.sh" "$SHARE/lib.sh"
 install -m 755 "$SRC/server/steam-remote-server.sh" "$SHARE/server/steam-remote-server.sh"
 install -m 644 "$SRC/config.example" "$SHARE/config.example"
 [ -f "$SRC/VERSION" ] && install -m 644 "$SRC/VERSION" "$SHARE/VERSION"
 for c in "${COMMANDS[@]}"; do install -m 755 "$SRC/linux/$c" "$BIN/$c"; done
+
+if [ "$IS_MAC" = 1 ]; then
+  # Double-click launchers: Terminal runs .command files.
+  mkdir -p "$MAC_APPS"
+  printf '#!/bin/bash\nexport STEAM_REMOTE_PAUSE=1\nexec "%s/steam-connect"\n' "$BIN" >"$MAC_APPS/Steam Machine - Connect.command"
+  printf '#!/bin/bash\nexport STEAM_REMOTE_PAUSE=1\nexec "%s/steam-ssh"\n' "$BIN" >"$MAC_APPS/Steam Machine - SSH.command"
+  chmod 755 "$MAC_APPS/Steam Machine - Connect.command" "$MAC_APPS/Steam Machine - SSH.command"
+else
+mkdir -p "$APPS" "$ICONS"
 install -m 644 "$SRC/assets/icons/steam-remote-connect.svg" "$ICONS/steam-remote-connect.svg"
 install -m 644 "$SRC/assets/icons/steam-remote-ssh.svg" "$ICONS/steam-remote-ssh.svg"
 
@@ -161,6 +192,7 @@ EOF
 chmod 644 "$APPS"/steam-remote-*.desktop
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" >/dev/null 2>&1 || true
 command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+fi
 
 say "Installed $(cat "$SHARE/VERSION" 2>/dev/null || echo Steam Machine Remote Access): ${COMMANDS[*]}"
 
@@ -169,6 +201,9 @@ case ":$PATH:" in
   *":$BIN:"*) ;;
   *)
     warn "$BIN isn't on your PATH yet, so the commands won't be found. Fix it with ONE of:"
+    if [ "$IS_MAC" = 1 ]; then
+      echo "   zsh (macOS's default):  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zprofile && source ~/.zprofile"
+    fi
     echo "   fish:  fish_add_path ~/.local/bin"
     echo "   bash:  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
     echo "   zsh:   echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"

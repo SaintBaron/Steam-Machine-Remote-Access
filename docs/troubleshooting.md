@@ -30,6 +30,7 @@ steam-ssh /home/.steam-remote/steam-remote-server.sh --check
 - [Black picture](#black-picture)
 - [Displays](#displays)
 - [After a SteamOS update](#after-a-steamos-update)
+- [macOS-specific](#macos-specific)
 - [Windows-specific](#windows-specific)
 - [Host key changed](#host-key-changed)
 
@@ -161,6 +162,16 @@ To see what was restored at the last boot:
 ```sh
 steam-ssh "journalctl -u steam-remote-heal.service -b --no-pager -o cat"
 ```
+
+## macOS-specific
+
+| Symptom | Fix |
+| --- | --- |
+| `No route to host` or timeouts, though the Steam Machine is on | macOS 15+ blocks apps from your local network until you allow them: **System Settings > Privacy & Security > Local Network**, turn on Terminal (and Moonlight) |
+| `python3` asks to install the Command Line Tools | Let it, or run `xcode-select --install`. Wake-on-LAN, `steam-pair` and the clean disconnect when you close the window need it |
+| `steam-connect: command not found` | `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile && source ~/.zprofile` |
+| Double-clicking a launcher says it can't be opened | Right-click it > **Open** once, or run `chmod +x ~/Applications/Steam*.command` |
+| Moonlight doesn't open | It must be in `/Applications` or `~/Applications`. Connect with `steam-connect nostream` and open Moonlight by hand |
 
 ## Windows-specific
 

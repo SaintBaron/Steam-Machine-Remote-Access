@@ -1,6 +1,6 @@
 # Setup guide: Debian and Ubuntu (and Linux Mint, Pop!_OS, Zorin...)
 
-This guide sets up [Steam Machine Remote Access](https://github.com/SaintBaron/Steam-Machine-Remote-Access) with this PC as the client. Other guides: [Arch](arch.md), [Windows](windows.md).
+This guide sets up [Steam Machine Remote Access](https://github.com/SaintBaron/Steam-Machine-Remote-Access) with this PC as the client. Other guides: [Arch](arch.md), [macOS](macos.md), [Windows](windows.md).
 
 When you finish, this PC can wake the Steam Machine, stream it in Moonlight and open a terminal on it, all from one command or shortcut. No other device on your network can log in to it or stream from it.
 
@@ -478,10 +478,10 @@ Be careful with `ALLOWED_IPS`. Removing this PC's address locks it out. The comm
 Each PC needs a **fixed IP** (Part 1) and its **own SSH key**. Logins are locked to known keys and addresses, so the new PC can't add itself; an existing PC adds it.
 
 1. **On the new PC:** install as in Part 3, then create its key without running the full setup yet:
-   - Linux: `ssh-keygen -t ed25519 -f ~/.ssh/steam-machine_ed25519`
+   - Linux or macOS: `ssh-keygen -t ed25519 -f ~/.ssh/steam-machine_ed25519`
    - Windows: `ssh-keygen -t ed25519 -f $HOME\.ssh\steam-machine_ed25519`
 
-   (If that says the folder doesn't exist, create it first: `mkdir -p ~/.ssh` on Linux, `mkdir -Force $HOME\.ssh` on Windows.) Copy its **public** key (the `.pub` file) to this PC however you like: USB stick, email or chat. It's public, so it isn't secret.
+   (If that says the folder doesn't exist, create it first: `mkdir -p ~/.ssh` on Linux or macOS, `mkdir -Force $HOME\.ssh` on Windows.) Copy its **public** key (the `.pub` file) to this PC however you like: USB stick, email or chat. It's public, so it isn't secret.
 2. **On this PC:**
 
    ```sh

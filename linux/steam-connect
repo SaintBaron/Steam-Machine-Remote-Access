@@ -38,7 +38,7 @@ done
 load_config
 LOCK="${XDG_RUNTIME_DIR:-$HOME/.cache}/steam-connect.lock"
 HANGUP_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/steam-remote/disconnect.log"
-SELF=$(readlink -f "$0")
+SELF=$(real_path "$0")
 XPROP_FIX="DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE"
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ disconnect() {
     ssh -S "$CTL" -O exit "$HOST_ALIAS" >/dev/null 2>&1
     rm -f "$CTL"
     local pids
-    pids=$(pgrep -a -x ssh | grep -F -e "$HOST_ALIAS" -e "$MACHINE_IP" -e "${REMOTE_MACHINE_IP:-$MACHINE_IP}" | cut -d' ' -f1 | xargs)
+    pids=$(ssh_pids "$HOST_ALIAS" "$MACHINE_IP" "$REMOTE_MACHINE_IP")
     if [ -n "$pids" ]; then
       # shellcheck disable=SC2086
       kill $pids 2>/dev/null; sleep 1
@@ -95,25 +95,28 @@ SR_ARMED=0
 # shellcheck disable=SC2317  # runs from a trap
 on_exit() {
   local rc=$?
-  [ "$SR_ARMED" = 1 ] || return 0
-  SR_ARMED=0
-  echo
-  disconnect
-  # Launched from the app menu: let the messages be read before the window closes.
-  if [ -n "${STEAM_REMOTE_PAUSE:-}" ] && [ -t 0 ]; then
-    if [ "$rc" -ne 0 ] && [ "$rc" -lt 129 ]; then read -r -p 'Press Enter to close this window' _; else sleep 2; fi
+  if [ "$SR_ARMED" = 1 ]; then
+    SR_ARMED=0
+    echo
+    disconnect
+    # Launched from the app menu: let the messages be read before the window closes.
+    if [ -n "${STEAM_REMOTE_PAUSE:-}" ] && [ -t 0 ]; then
+      if [ "$rc" -ne 0 ] && [ "$rc" -lt 129 ]; then read -r -p 'Press Enter to close this window' _; else sleep 2; fi
+    fi
   fi
+  [ -z "${SR_LOCK_DIR:-}" ] || rm -rf "$SR_LOCK_DIR"   # macOS lock (Linux's flock lock ends with the process)
   return 0
 }
 # Window closed: the terminal may kill everything left in it, so a detached copy
 # of this script does the disconnect and logs its output.
 # shellcheck disable=SC2317  # runs from a trap
 on_hangup() {
+  trap '' HUP   # ignored signals stay ignored in children, so the detached copy survives the hangup
   if [ "$SR_ARMED" = 1 ]; then
     SR_ARMED=0
     mkdir -p "$(dirname "$HANGUP_LOG")"
     (umask 077; echo "--- $(date '+%F %T') window closed" >>"$HANGUP_LOG")
-    setsid "$SELF" disconnect-after-hangup </dev/null >>"$HANGUP_LOG" 2>&1 9>&- &
+    detach "$SELF" disconnect-after-hangup </dev/null >>"$HANGUP_LOG" 2>&1 9>&- &
   fi
   exit 129
 }
@@ -124,8 +127,7 @@ trap 'exit 143' TERM
 
 # Only one steam-connect at a time, so closing a second window can't cut off the first.
 mkdir -p "$(dirname "$LOCK")"
-exec 9>"$LOCK"
-flock -n 9 || die "steam-connect is already running in another window. Use that one, or close it first."
+take_lock "$LOCK" || die "steam-connect is already running in another window. Use that one, or close it first."
 
 command -v python3 >/dev/null 2>&1 || warn "python3 isn't installed, so Wake-on-LAN won't work."
 MOONLIGHT=$(moonlight_cmd)
@@ -209,7 +211,7 @@ fi
 if [ "$STREAM" = 1 ]; then
   say "Starting Moonlight ($MOONLIGHT_APP)"
   # shellcheck disable=SC2086  # MOONLIGHT may be "flatpak run <id>"
-  setsid $MOONLIGHT stream "$TARGET" "$MOONLIGHT_APP" </dev/null >/dev/null 2>&1 9>&- &
+  detach $MOONLIGHT stream "$TARGET" "$MOONLIGHT_APP" </dev/null >/dev/null 2>&1 9>&- &
 fi
 
 # 10. Stay open until you're done.

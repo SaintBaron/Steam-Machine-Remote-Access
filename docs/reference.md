@@ -4,7 +4,7 @@ Every file, service, command and setting, for when you want to know exactly what
 
 ## Commands on your PC
 
-| Linux | Windows | What it does |
+| Linux and macOS | Windows | What it does |
 | --- | --- | --- |
 | `steam-connect` | *Steam Machine - Connect* | Wake, log in, start Sunshine, stream. Press **Q** to end |
 | `steam-connect restart` | `steam-connect.ps1 -Restart` | Same, restarting Sunshine first |
@@ -22,7 +22,7 @@ Every file, service, command and setting, for when you want to know exactly what
 | `steam-remote-setup remove-client IP` | `steam-remote-setup.ps1 remove-client IP` | Stop allowing a PC |
 | `steam-remote-setup uninstall-server` | `steam-remote-setup.ps1 uninstall-server` | Remove everything from the Steam Machine |
 
-Every Linux command has `--help` and `--version`.
+Every Linux and macOS command has `--help` and `--version`.
 
 ## On the Steam Machine
 
@@ -88,15 +88,16 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 
 Values are parsed and validated, never run as code. After editing, apply with `sudo /home/.steam-remote/steam-remote-server.sh`. A fully commented example is in [server/config.example](../server/config.example).
 
-## On a Linux PC
+## On a Linux PC or a Mac
 
 | Path | What it is |
 | --- | --- |
 | `~/.local/bin/steam-connect`, `steam-ssh`, `steam-pair`, `steam-remote-setup` | The commands |
 | `~/.local/share/steam-remote/lib.sh` | Code shared by the commands |
 | `~/.local/share/steam-remote/server/steam-remote-server.sh` | The server script that setup sends to the Steam Machine |
-| `~/.local/share/applications/steam-remote-*.desktop` | App-menu launchers |
-| `~/.local/share/icons/hicolor/scalable/apps/steam-remote-*.svg` | Their icons |
+| `~/.local/share/applications/steam-remote-*.desktop` | App-menu launchers (Linux) |
+| `~/Applications/Steam Machine - Connect.command`, `... - SSH.command` | Double-click launchers (macOS) |
+| `~/.local/share/icons/hicolor/scalable/apps/steam-remote-*.svg` | Their icons (Linux) |
 | `~/.config/steam-remote/config` | This PC's settings (`0600`) |
 | `~/.config/steam-remote/mac` | The Steam Machine's learned MAC address |
 | `~/.local/state/steam-remote/disconnect.log` | Output of disconnects done after the window was closed |
