@@ -411,6 +411,16 @@ restore_sunshine() {
   fi
 }
 
+# Do SSH's real, effective settings match the lockdown for the chosen login mode?
+ssh_effective_ok() {
+  local eff methods=publickey,password pw=yes
+  [ "$AUTH_MODE" = key ] && { methods=publickey; pw=no; }
+  eff=$(sshd -T 2>/dev/null) || return 0   # can't tell; sshd's own start check still applies
+  grep -qx "authenticationmethods $methods" <<<"$eff" && grep -qx "passwordauthentication $pw" <<<"$eff" \
+    && grep -qx "pubkeyauthentication yes" <<<"$eff" && grep -qx "permitrootlogin no" <<<"$eff" \
+    && grep -q "^allowusers " <<<"$eff"
+}
+
 # ------------------------------------------------------------------ apply (check and repair)
 apply() {
   need_root
@@ -490,6 +500,18 @@ PermitOpen 127.0.0.1:47990
 ClientAliveInterval 30
 ClientAliveCountMax 4
 EOF
+  # sshd uses the first value it reads for each setting, and reads sshd_config.d/ in name
+  # order. An older drop-in sorting before ours (say a "10-lan-only.conf" from an earlier,
+  # hand-made setup) would win, and could switch password logins off and lock you out.
+  # Move such files aside; --uninstall puts them back.
+  local other
+  for other in "$(dirname "$SSHD_DROPIN")"/*.conf; do
+    if [ ! -f "$other" ] || [ "$other" = "$SSHD_DROPIN" ]; then continue; fi
+    [[ "${other##*/}" < "${SSHD_DROPIN##*/}" ]] || continue
+    grep -qiE '^[[:space:]]*(AuthenticationMethods|PasswordAuthentication|PubkeyAuthentication|KbdInteractiveAuthentication|ChallengeResponseAuthentication|PermitRootLogin|PermitEmptyPasswords|AllowUsers|DenyUsers|AllowGroups|DenyGroups)[[:space:]]' "$other" || continue
+    mv -f "$other" "$other.disabled-by-steam-remote" \
+      && { ssh_changed=1; CHANGED+=("$other (moved aside)"); log "moved $other aside to $other.disabled-by-steam-remote: it would override this project's SSH settings"; }
+  done
 
   # Firewall (on top of SteamOS's own firewalld)
   local fw_changed=0
@@ -665,6 +687,10 @@ EOF
   if [ "$fw_changed" = 1 ] || ! sc is-active --quiet steam-remote-guard.service; then
     sc reset-failed steam-remote-guard.service >/dev/null 2>&1
     sc --no-block restart steam-remote-guard.service
+  fi
+  if [ -z "$R" ] && ! ssh_effective_ok; then
+    log "WARNING: SSH's effective settings don't match this project's lockdown. Something else in"
+    log "  /etc/ssh/sshd_config or /etc/ssh/sshd_config.d/ overrides it. Check with: sudo sshd -T | grep -E 'authenticationmethods|passwordauthentication|permitrootlogin|allowusers'"
   fi
   if [ "$ssh_changed" = 1 ]; then
     if [ -n "$R" ] || sshd -t 2>/dev/null; then
@@ -1163,6 +1189,14 @@ setup() {
     sshd -T 2>/dev/null | grep -E '^(permitrootlogin|allowusers|authenticationmethods) ' | sed 's/^/   /'
     if systemctl is-active --quiet steam-remote-guard.service; then echo "   firewall: active"
     else warn "the firewall isn't running: systemctl status steam-remote-guard.service"; fi
+    # A Sunshine started some other way (say an older, hand-made setup that runs it at login)
+    # would hold its ports, and this project's Sunshine couldn't start.
+    if ! systemctl is-active --quiet "$SUN_UNIT" && ss -ltn 2>/dev/null | grep -q ':47989 '; then
+      warn "Another Sunshine is already running (port 47989 is taken), so this project's Sunshine can't start."
+      echo "   If you set one up before, stop it and keep it from starting at login, as $USER_NAME:"
+      echo "     systemctl --user disable --now app-dev.lizardbyte.app.Sunshine.service"
+      echo "   (or remove whatever else starts it), then run the setup again."
+    fi
     say "Test-starting Sunshine (about 15 seconds)"
     [ -n "$STREAM_OUTPUT" ] && [ -n "$TV_OUTPUT" ] && { echo off >"$DRM/$TV_OUTPUT/status"; echo detect >"$DRM/$STREAM_OUTPUT/status"; sleep 2; }
     systemctl start "$SUN_UNIT"
@@ -1292,6 +1326,9 @@ uninstall() {
   sc daemon-reload
   [ -n "$R" ] || nft delete table inet steam_remote 2>/dev/null
   rm -f "$NFT_FILE" "$SUDOERS" "$SSHD_DROPIN" "$SSHD_DROPIN.broken"
+  for u in "$(dirname "$SSHD_DROPIN")"/*.conf.disabled-by-steam-remote; do
+    [ -f "$u" ] && mv -f "$u" "${u%.disabled-by-steam-remote}" && log "put back ${u%.disabled-by-steam-remote}"
+  done
   rm -rf "$R/var/lib/sunshine-bwrap"
   if [ "$keep_sun" = 0 ]; then
     [ -n "$R" ] || flatpak uninstall --system -y --noninteractive "$SUN_APP" >/dev/null 2>&1
