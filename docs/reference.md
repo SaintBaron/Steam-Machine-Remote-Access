@@ -37,6 +37,8 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `/etc/ssh/sshd_config` | Gets an `Include /etc/ssh/sshd_config.d/*.conf` line at the top if missing |
 | `/etc/steam-remote-guard.nft` | Firewall rules (nftables table `inet steam_remote`) |
 | `/etc/sudoers.d/zz-steam-remote` | The narrow sudo rule |
+| `/etc/systemd/system/sshd.service.d/10-steam-remote.conf` | Makes SteamOS's SSH service require the firewall, and refuse to start unless the lockdown is in effect |
+| `/etc/atomic-update.conf.d/steam-remote.conf` | Adds the lockdown, firewall rules, sudo rule and idle timer to SteamOS's update keep list |
 | `/root/.var/app/dev.lizardbyte.app.Sunshine/config/sunshine/` | Sunshine's own config, web UI login and paired devices |
 | `/var/lib/sunshine-bwrap/bwrap` | Root-only setuid copy of bubblewrap for KMS capture, recreated at each start |
 | NetworkManager wired connections | `802-3-ethernet.wake-on-lan magic` |

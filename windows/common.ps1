@@ -2,7 +2,7 @@
 # https://github.com/SaintBaron/Steam-Machine-Remote-Access
 # Dot-sourced by the other scripts; not run on its own. Works in Windows PowerShell 5.1 and PowerShell 7.
 
-$SrVersion    = '1.0.0'
+$SrVersion    = '1.0.1'
 $SrConfigDir  = Join-Path $env:APPDATA 'steam-remote'
 $SrConfig     = Join-Path $SrConfigDir 'config'
 $SrMacCache   = Join-Path $SrConfigDir 'mac'

@@ -151,9 +151,19 @@ sudo rm -rf /home/.steam-remote/sunshine-backup /root/.var/app/dev.lizardbyte.ap
 
 ### After a SteamOS update
 
-Updates can remove files from `/etc`, including the SSH lockdown. The heal service runs before sshd at every boot and puts it back, so sshd never starts without it. If an update ever removed the heal service as well, sshd could start with SteamOS's defaults (password-only logins from your network) until you next connect: `steam-connect` checks and repairs this every time. So connect once soon after a SteamOS update, or check at the Steam Machine with `/home/.steam-remote/steam-remote-server.sh --check`.
+Since SteamOS 3.6, an update discards every change in `/etc` except the paths on SteamOS's keep list. The list includes systemd `.service` files, `.service.d` drop-ins and enable links, but not SSH config drop-ins, sudo rules or firewall files. So without help, an update would leave SSH switched on but without its lockdown: password-only logins from your network. Three layers stop that from happening:
 
-If `/home/.steam-remote/config` is missing or invalid and the lockdown file is gone, the heal service doesn't fall back to an open SSH. It writes `DenyUsers *` instead, which closes SSH until the config is fixed at the keyboard.
+1. **The protections stay put.** The setup adds its files to SteamOS's keep list, through `/etc/atomic-update.conf.d/steam-remote.conf`. This is SteamOS's own mechanism for keeping files through updates.
+2. **SSH refuses to start without them.** A drop-in for SteamOS's SSH service (`/etc/systemd/system/sshd.service.d/10-steam-remote.conf`, kept by SteamOS's default list) makes SSH require the firewall. Before every start, it also checks that SSH's real, effective settings demand key **and** password from an allowed address. If anything is missing (the lockdown file, the line that loads it, or the firewall), SSH stays **off** rather than falling back to SteamOS's defaults.
+3. **Anything lost is put back.** The heal service (kept by SteamOS's default list) runs at every boot, before SSH, and restores anything that's missing. `steam-connect` also checks on every connect.
+
+If `/home/.steam-remote/config` is missing or invalid, the heal service doesn't loosen anything: SSH stays closed until the config is fixed at the Steam Machine's keyboard.
+
+Layer 2 needs the drop-in itself to survive. It's on SteamOS's default keep list, so it does today. If Valve ever changed that list, layers 1 and 3 would still apply, and running `--check` after a big update shows straight away if anything is missing:
+
+```bash
+/home/.steam-remote/steam-remote-server.sh --check
+```
 
 ### Setup trusts the Steam Machine account at that moment
 

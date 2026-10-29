@@ -22,7 +22,7 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 WAIT_FOR_MOONLIGHT = 120  # seconds to wait for you to click the host in Moonlight
 
 # Sunshine uses a self-signed certificate. The connection only reaches this PC's end

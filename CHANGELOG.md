@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 - 2026-10-29
+
+- SteamOS updates can no longer leave SSH open with SteamOS's default settings:
+  - the SSH lockdown, firewall rules, sudo rule and idle timer are added to SteamOS's own update keep list (`/etc/atomic-update.conf.d/steam-remote.conf`);
+  - SteamOS's SSH service now requires the firewall, and refuses to start unless the lockdown is actually in effect.
+- To update: run the installer again, then `steam-remote-setup update-server` (Windows: `steam-remote-setup.ps1 update-server`).
+
 ## 1.0.0 - 2026-10-27
 
 First public release.

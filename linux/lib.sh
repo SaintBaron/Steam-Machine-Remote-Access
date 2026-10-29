@@ -2,7 +2,7 @@
 # lib.sh: shared code for the Steam Machine Remote Access Linux commands.
 # Sourced by steam-connect, steam-ssh and steam-remote-setup; not run on its own.
 
-SR_VERSION="1.0.0"
+SR_VERSION="1.0.1"
 SR_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/steam-remote"
 SR_CONFIG="$SR_CONFIG_DIR/config"
 SR_MAC_CACHE="$SR_CONFIG_DIR/mac"

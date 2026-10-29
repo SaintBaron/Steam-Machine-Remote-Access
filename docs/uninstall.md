@@ -40,7 +40,7 @@ If `/home/.steam-remote` is already gone, remove the leftovers by hand:
 
 ```bash
 sudo systemctl disable --now steam-remote-sunshine.service steam-remote-guard.service steam-remote-display.service steam-remote-idle.timer steam-remote-heal.service
-sudo rm -f /etc/systemd/system/steam-remote-* /etc/steam-remote-guard.nft /etc/sudoers.d/zz-steam-remote /etc/ssh/sshd_config.d/10-steam-remote.conf
+sudo rm -f /etc/systemd/system/steam-remote-* /etc/systemd/system/sshd.service.d/10-steam-remote.conf /etc/atomic-update.conf.d/steam-remote.conf /etc/steam-remote-guard.nft /etc/sudoers.d/zz-steam-remote /etc/ssh/sshd_config.d/10-steam-remote.conf
 sudo rm -rf /var/lib/sunshine-bwrap
 sudo systemctl daemon-reload
 sudo nft delete table inet steam_remote 2>/dev/null

@@ -47,12 +47,13 @@ You can't SSH in at all, usually because this PC's IP changed or a setting went 
    sudo /home/.steam-remote/steam-remote-server.sh --add-client NEW_PC_IP
    ```
    Then fix the DHCP reservation in your router so it doesn't change again.
-3. **Something else?** Turn the firewall off temporarily and check the SSH settings:
+3. **Something else?** See what's wrong, and let the setup repair it:
    ```bash
-   sudo systemctl stop steam-remote-guard.service
-   sudo sshd -T | grep -E '^(allowusers|authenticationmethods|permitrootlogin)'
+   /home/.steam-remote/steam-remote-server.sh --check
+   systemctl status sshd.service steam-remote-guard.service --no-pager
+   sudo /home/.steam-remote/steam-remote-server.sh
    ```
-   When you've fixed it, put everything back with `sudo /home/.steam-remote/steam-remote-server.sh`.
+   SSH is built to stay **off** if its lockdown or the firewall is missing, so `sshd.service` failing to start usually means one of those is broken. The repair command fixes it.
 
 Last resort: `sudo /home/.steam-remote/steam-remote-server.sh --uninstall --keep-sunshine` removes the lockdown (SSH is turned off). Then set it up again from your PC.
 
@@ -149,7 +150,9 @@ Once a fixed Sunshine ships, set `BLACK_SCREEN_FIX="no"` in your config, because
 
 ## After a SteamOS update
 
-SteamOS updates can remove files from `/etc`. The self-heal service restores them at boot, and every connect checks too. If Connect says *Part of the Steam Machine setup is missing*, it lists what and repairs it after asking for the password. Expect this after most updates.
+SteamOS updates discard most changes in `/etc`. This project's files are on SteamOS's keep list, the self-heal service restores anything missing at boot, and every connect checks too. If Connect says *Part of the Steam Machine setup is missing*, it lists what and repairs it after asking for the password.
+
+If you can't connect at all after an update, SSH has probably stayed off on purpose because part of its lockdown was missing. At the Steam Machine's keyboard, run `sudo /home/.steam-remote/steam-remote-server.sh` to repair it.
 
 If the self-heal service itself is gone and Connect can't repair it, run the setup again from your PC. The settings in `/home/.steam-remote/config` survive updates.
 

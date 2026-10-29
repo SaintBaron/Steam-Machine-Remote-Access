@@ -521,7 +521,7 @@ steam-ssh.ps1 'sudo flatpak update --system -y dev.lizardbyte.app.Sunshine'
 winget upgrade -e --id MoonlightGameStreamingProject.Moonlight
 ```
 
-**SteamOS.** Update as normal. Updates can remove files from `/etc`. The self-heal service puts them back at the next boot, and `steam-connect` checks again each time it connects. If something was missing, Connect lists it and asks for the password to repair it.
+**SteamOS.** Update as normal. SteamOS updates discard most changes in `/etc`, so this project adds its files to SteamOS's keep list, and the self-heal service puts back anything still missing at the next boot. SSH won't start without its lockdown, so an update can't leave it open. `steam-connect` also checks every time it connects, and repairs anything missing after asking for the password.
 
 </details>
 

@@ -35,7 +35,7 @@
 set -u
 umask 022
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 R="${STEAM_REMOTE_TEST_ROOT:-}"   # test prefix only; leave unset for real use
 
 KIT_REAL="/home/.steam-remote"
@@ -48,6 +48,8 @@ SSHD_MAIN="$R/etc/ssh/sshd_config"
 SSHD_DROPIN="$R/etc/ssh/sshd_config.d/10-steam-remote.conf"
 NFT_FILE="$R/etc/steam-remote-guard.nft"
 SUDOERS="$R/etc/sudoers.d/zz-steam-remote"
+SSHD_UNIT_DROPIN="$R/etc/systemd/system/sshd.service.d/10-steam-remote.conf"
+KEEP_LIST="$R/etc/atomic-update.conf.d/steam-remote.conf"
 DRM="$R/sys/class/drm"
 SUN_APP="dev.lizardbyte.app.Sunshine"
 SUN_DATA="$R/root/.var/app/$SUN_APP"
@@ -371,6 +373,7 @@ apply() {
       mkdir -p "$(dirname "$SSHD_DROPIN")"
       printf '%s\n' "# Steam Machine Remote Access: config missing or invalid, so SSH is closed until it's fixed." \
         "DenyUsers *" >"$SSHD_DROPIN"
+      # (sshd's start check also refuses this, so SSH stays off rather than half-open.)
       grep -q '^Include /etc/ssh/sshd_config.d/\*.conf' "$SSHD_MAIN" 2>/dev/null || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' "$SSHD_MAIN"
       sc --no-block restart sshd.service
       log "SSH is closed until $CONFIG is fixed (at the Steam Machine's keyboard)"
@@ -393,6 +396,27 @@ apply() {
       && { ssh_changed=1; CHANGED+=("$SSHD_MAIN (Include line)"); log "added the Include line to $SSHD_MAIN"; }
     rm -f "$tmp_main"
   fi
+  # SSH never runs without its lockdown and firewall. SteamOS updates keep this file
+  # (*.service.d/** is on SteamOS's own keep list), so even if an update removed the
+  # lockdown, sshd would refuse to start rather than fall back to SteamOS's defaults.
+  put "$SSHD_UNIT_DROPIN" 644 <<'EOF' || true
+# Steam Machine Remote Access: never run SSH without its lockdown and firewall.
+[Unit]
+Requires=steam-remote-guard.service
+After=steam-remote-guard.service steam-remote-heal.service
+
+[Service]
+ExecStartPre=/usr/bin/sh -c '/usr/bin/sshd -T 2>/dev/null | grep -qx "authenticationmethods publickey,password" && /usr/bin/sshd -T 2>/dev/null | grep -q "^allowusers "'
+EOF
+  # SteamOS updates discard /etc changes not on a keep list. Add ours, so the
+  # protections survive updates instead of relying on the boot-time repair alone.
+  put "$KEEP_LIST" 644 <<'EOF' || true
+# Steam Machine Remote Access: keep these files through SteamOS updates.
+/etc/ssh/sshd_config.d/10-steam-remote.conf
+/etc/steam-remote-guard.nft
+/etc/sudoers.d/zz-steam-remote
+/etc/systemd/system/steam-remote-idle.timer
+EOF
   put "$SSHD_DROPIN" 644 <<EOF && ssh_changed=1
 # Steam Machine Remote Access: only $USER_NAME, only from the allowed PCs, key AND password.
 PermitRootLogin no
@@ -661,7 +685,7 @@ check() {
   local bad=0 f u
   if ! load_config; then echo "MISSING $CONFIG (run the first-time setup)"; exit 1; fi
   validate_config 2>&1 | sed 's/^/CONFIG /' | grep . && bad=1
-  for f in "$SSHD_DROPIN" "$NFT_FILE"; do
+  for f in "$SSHD_DROPIN" "$NFT_FILE" "$SSHD_UNIT_DROPIN" "$KEEP_LIST"; do
     [ -e "$f" ] || { echo "MISSING $f"; bad=1; }
   done
   # /etc/sudoers.d is root-only on some systems, so without root ask sudo instead
@@ -914,6 +938,8 @@ uninstall() {
     sc disable --now "$u" >/dev/null 2>&1
     rm -f "$UNITS_DIR/$u"
   done
+  rm -f "$SSHD_UNIT_DROPIN" "$KEEP_LIST"
+  rmdir "$(dirname "$SSHD_UNIT_DROPIN")" 2>/dev/null
   sc daemon-reload
   [ -n "$R" ] || nft delete table inet steam_remote 2>/dev/null
   rm -f "$NFT_FILE" "$SUDOERS" "$SSHD_DROPIN" "$SSHD_DROPIN.broken"
