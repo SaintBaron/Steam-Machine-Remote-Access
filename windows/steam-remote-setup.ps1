@@ -79,9 +79,12 @@ STREAM_FPS="$($c.STREAM_FPS)"
 # Bitrate in Mbps at home, and away from home (through the VPN, where upload is slower).
 STREAM_BITRATE="$($c.STREAM_BITRATE)"
 STREAM_BITRATE_AWAY="$($c.STREAM_BITRATE_AWAY)"
-# Video codec: auto, HEVC, AV1 or H.264. HDR: yes or no.
+# Video codec: auto, HEVC, AV1 or H.264. HDR: yes or no (empty = Moonlight's Enable HDR).
 STREAM_CODEC="$($c.STREAM_CODEC)"
 STREAM_HDR="$($c.STREAM_HDR)"
+# Turn Game Mode's HDR on or off for each stream to match Moonlight's Enable HDR (or
+# STREAM_HDR), so that one switch does both. Steam's own setting comes back afterwards.
+MATCH_HDR="$($c.MATCH_HDR)"
 "@
 }
 
@@ -107,7 +110,7 @@ function Invoke-OtherSettings($c) {
     $app = if ($c.MOONLIGHT_APP) { $c.MOONLIGHT_APP } else { 'Desktop' }
     $bc = if ($c.BROADCAST) { $c.BROADCAST } else { 'automatic' }
     $name = if ($c.CLIENT_NAME) { $c.CLIENT_NAME } else { 'this computer''s name' }
-    Write-Host "   Other settings: Moonlight app '$app', Game Mode capture fix $($c.BLACK_SCREEN_FIX),"
+    Write-Host "   Other settings: Moonlight app '$app', Game Mode capture fix $($c.BLACK_SCREEN_FIX), HDR follows Moonlight $($c.MATCH_HDR),"
     Write-Host "   wake wait $($c.WAKE_TIMEOUT)s, wake broadcast $bc, name in Sunshine: $name."
     if ((Read-Default '   Change these? (y/n)' 'n') -notmatch '^[Yy]') { return }
     do {
@@ -120,6 +123,10 @@ function Invoke-OtherSettings($c) {
     Write-Host '   menus and HDR colours right. Leave it on unless you know you don''t need it.'
     do { $v = (Read-Default '   Game Mode capture fix: yes or no' $c.BLACK_SCREEN_FIX).ToLower() } until ($v -match '^(yes|no)$')
     $c.BLACK_SCREEN_FIX = $v
+    Write-Host '   With HDR following Moonlight, Moonlight''s Enable HDR switch also turns Game Mode''s HDR'
+    Write-Host '   on or off for each stream. Steam''s own setting comes back when you disconnect.'
+    do { $v = (Read-Default '   HDR follows Moonlight: yes or no' $c.MATCH_HDR).ToLower() } until ($v -match '^(yes|no)$')
+    $c.MATCH_HDR = $v
     do {
         $v = Read-Default '   Seconds to wait for it to wake from sleep' $c.WAKE_TIMEOUT
         $ok = $v -match '^[0-9]{2,3}$'

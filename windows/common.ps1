@@ -12,7 +12,7 @@ $SrServer     = "$SrKit/steam-remote-server.sh"        # on the Steam Machine
 $SrSunUnit    = 'steam-remote-sunshine.service'        # on the Steam Machine
 $SrConfigKeys = 'MACHINE_IP','REMOTE_MODE','REMOTE_PC_IP','REMOTE_MACHINE_IP','MACHINE_USER','HOST_ALIAS','KEY_FILE','MACHINE_MAC','BROADCAST',
                 'WAKE_TIMEOUT','MOONLIGHT_APP','CLIENT_NAME','WEBUI_PORT','PERSIST','KEEPALIVE','BLACK_SCREEN_FIX',
-                'STREAM_RESOLUTION','STREAM_FPS','STREAM_BITRATE','STREAM_BITRATE_AWAY','STREAM_CODEC','STREAM_HDR'
+                'STREAM_RESOLUTION','STREAM_FPS','STREAM_BITRATE','STREAM_BITRATE_AWAY','STREAM_CODEC','STREAM_HDR','MATCH_HDR'
 
 function Write-SrInfo([string]$Message) { Write-Host '==> ' -ForegroundColor Blue -NoNewline; Write-Host $Message }
 function Write-SrWarn([string]$Message) { Write-Host "Warning: $Message" -ForegroundColor Yellow }
@@ -35,7 +35,7 @@ function Read-SrConfigFile([string]$Path) {
         KEY_FILE = '~/.ssh/steam-machine_ed25519'; MACHINE_MAC = ''; BROADCAST = ''
         WAKE_TIMEOUT = '90'; MOONLIGHT_APP = 'Desktop'; CLIENT_NAME = ''; WEBUI_PORT = '47990'
         PERSIST = '2h'; KEEPALIVE = '600'; BLACK_SCREEN_FIX = 'yes'
-        STREAM_RESOLUTION = ''; STREAM_FPS = ''; STREAM_BITRATE = ''; STREAM_BITRATE_AWAY = '20'; STREAM_CODEC = ''; STREAM_HDR = ''
+        STREAM_RESOLUTION = ''; STREAM_FPS = ''; STREAM_BITRATE = ''; STREAM_BITRATE_AWAY = '20'; STREAM_CODEC = ''; STREAM_HDR = ''; MATCH_HDR = 'yes'
     }
     if (Test-Path -LiteralPath $Path) {
         foreach ($line in Get-Content -LiteralPath $Path) {
@@ -60,6 +60,7 @@ function Import-SrConfig {
     $Cfg.TARGET = $Cfg.MACHINE_IP   # the address actually used; Wait-SrAwake may switch it to REMOTE_MACHINE_IP
     if (-not $Cfg.BROADCAST) { $Cfg.BROADCAST = ($Cfg.MACHINE_IP -replace '\.[0-9]+$', '.255') }
     if (-not $Cfg.CLIENT_NAME) { $Cfg.CLIENT_NAME = $env:COMPUTERNAME }
+    if ($Cfg.MATCH_HDR -notmatch '^(yes|no)$') { $Cfg.MATCH_HDR = 'yes' }
     $Cfg.KEY_FILE = $Cfg.KEY_FILE -replace '^~', $HOME
     $problem = Test-SrStreamSettings $Cfg
     if ($problem) {
@@ -86,6 +87,17 @@ function Test-SrStreamSettings($c) {
     }
     if ($c.STREAM_HDR -notmatch '^(yes|no|)$') { return 'STREAM_HDR must be yes, no or empty' }
 }
+
+# Moonlight's own "Enable HDR" setting: 'yes' or 'no', or '' if it can't be read (Moonlight
+# never opened). Moonlight keeps it as "hdr" in its registry key.
+function Get-SrMoonlightHdrPref {
+    $key = 'HKCU:\Software\Moonlight Game Streaming Project\Moonlight'
+    if (-not (Test-Path $key)) { return '' }
+    $v = (Get-ItemProperty -Path $key -Name hdr -ErrorAction SilentlyContinue).hdr
+    if ("$v" -match '^(true|1)$') { 'yes' } else { 'no' }   # not saved yet: Moonlight's default is off
+}
+# What this stream asks for: STREAM_HDR if set, otherwise Moonlight's own setting.
+function Get-SrHdrWanted { if ($Cfg.STREAM_HDR) { $Cfg.STREAM_HDR } else { Get-SrMoonlightHdrPref } }
 
 # Moonlight's options for this stream (its bitrate is in Kbps). Away from home (through
 # a VPN), STREAM_BITRATE_AWAY replaces STREAM_BITRATE.

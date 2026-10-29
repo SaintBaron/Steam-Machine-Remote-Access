@@ -27,7 +27,7 @@ if (-not $mutex.WaitOne(0)) { Stop-SrError 'steam-connect is already running in 
 # and switches back to the TV however the session ends (Q, Ctrl+C, window closed,
 # network lost). Sent base64-encoded so no quoting can break it.
 $remote = @'
-FIX=$1; RESTART=$2; PORT=$3; WANT=${4:-}
+FIX=$1; RESTART=$2; PORT=$3; WANT=${4:-}; HDR=${5:-keep}
 K=/home/.steam-remote; S=$K/steam-remote-server.sh; U=steam-remote-sunshine.service
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWarning:\033[0m %s\n' "$*"; }
@@ -45,7 +45,7 @@ ok "$SO" && ok "$TV" && [ "$SO" != "$TV" ] && SW=1
 show() { echo off | sudo -n tee "/sys/class/drm/$1/status" >/dev/null; echo detect | sudo -n tee "/sys/class/drm/$2/status" >/dev/null; }
 # Game Mode capture fix; the xprop fallback is for server scripts older than 1.2.0.
 xp() {
-  if [ "$1" = 1 ]; then "$S" --composite on >/dev/null 2>&1 && return; else "$S" --composite off >/dev/null 2>&1 && return; fi
+  if [ "$1" = 1 ]; then "$S" --composite on >/dev/null 2>&1 && return; else "$S" --stream-end >/dev/null 2>&1 && return; fi
   DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE "$1" >/dev/null 2>&1
 }
 WATCH=
@@ -54,7 +54,7 @@ cleanup() {
   [ "$DONE" = 1 ] && return; DONE=1
   [ -n "$WATCH" ] && { pkill -P "$WATCH" 2>/dev/null; kill "$WATCH" 2>/dev/null; }
   echo; say "Disconnecting: stopping Sunshine"
-  [ "$FIX" = yes ] && xp 0
+  { [ "$FIX" = yes ] || [ "$HDR" != keep ]; } && xp 0
   sudo -n systemctl stop "$U"
   [ "$SW" = 1 ] && show "$SO" "$TV" && say "Switched back to the TV"
   say "Disconnected."
@@ -89,6 +89,8 @@ if journalctl -u "$U" _SYSTEMD_INVOCATION_ID="$(systemctl show -p InvocationID -
 fi
 say "Sunshine is ready. Web UI (while this window is open): https://localhost:$PORT"
 if [ "$FIX" = yes ]; then xp 1 || warn "Couldn't apply the Game Mode capture fix (fine in Desktop Mode)."; fi
+# Game Mode's HDR, matched to Moonlight's Enable HDR; Steam's own setting comes back afterwards.
+case "$HDR" in on|off) "$S" --hdr "$HDR" >/dev/null 2>&1 && say "Game Mode HDR $HDR, to match Moonlight" ;; esac
 if INFO=$("$S" --stream-info "$WANT" 2>/dev/null) && [ -n "$INFO" ]; then
   say "Stream check"; while IFS= read -r l; do echo "    $l"; done <<<"$INFO"
 fi
@@ -109,8 +111,10 @@ try {
     $fix = if ($Cfg.BLACK_SCREEN_FIX -eq 'yes') { 'yes' } else { 'no' }
     $rst = if ($Restart) { 'yes' } else { 'no' }
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($remote -replace "`r`n", "`n")))
-    $want = if ($Cfg.STREAM_HDR -eq 'no') { 'sdr' } elseif ($Cfg.STREAM_HDR -eq 'yes') { 'hdr' } else { 'any' }
-    $command = "bash <(echo $b64 | base64 -d) $fix $rst $($Cfg.WEBUI_PORT) $want"
+    $hdrWant = if ($NoStream) { '' } else { Get-SrHdrWanted }
+    $want = if ($hdrWant -eq 'no') { 'sdr' } elseif ($hdrWant -eq 'yes') { 'hdr' } else { 'any' }
+    $hdr = if ($Cfg.MATCH_HDR -eq 'yes' -and $hdrWant -eq 'yes') { 'on' } elseif ($Cfg.MATCH_HDR -eq 'yes' -and $hdrWant -eq 'no') { 'off' } else { 'keep' }
+    $command = "bash <(echo $b64 | base64 -d) $fix $rst $($Cfg.WEBUI_PORT) $want $hdr"
 
     # Start Moonlight in the background as soon as Sunshine answers.
     if (-not $NoStream) {

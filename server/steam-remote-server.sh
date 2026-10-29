@@ -38,6 +38,8 @@
 #   --stream-watch [S] [sdr]   wait up to S seconds for Moonlight to connect; report SDR or HDR
 #                              ("sdr": SDR was chosen on purpose, so no HDR hints)
 #   --composite on|off   make Game Mode draw onto one layer while streaming, then undo it
+#   --hdr on|off         Game Mode's HDR for this stream (Steam's own setting comes back after)
+#   --stream-end         put back everything a stream changed in Game Mode (run when Sunshine stops)
 # Used by the systemd units it installs:
 #   --boot-display   --idle-check   --backup-sunshine
 
@@ -551,7 +553,7 @@ ExecStartPre=-/usr/bin/setfacl -P -m u:root:x /run/user/$user_uid /run/user/$use
 ExecStart=/usr/bin/flatpak run --system --socket=wayland --env=QT_QPA_PLATFORM=offscreen $SUN_APP
 ExecStop=/usr/bin/flatpak kill $SUN_APP
 ExecStopPost=-$SELF_REAL --backup-sunshine
-ExecStopPost=-/bin/sh -c '[ "\$\$SERVICE_RESULT" = success ] && exec /usr/bin/runuser -u $USER_NAME -- $SELF_REAL --composite off'
+ExecStopPost=-/bin/sh -c '[ "\$\$SERVICE_RESULT" = success ] && exec /usr/bin/runuser -u $USER_NAME -- $SELF_REAL --stream-end'
 Restart=on-failure
 RestartSec=5
 EOF
@@ -745,6 +747,39 @@ in_game_mode() {   # gamescope sets this property as soon as it starts
   [ -n "$(gs_prop GAMESCOPE_HDR_OUTPUT_FEEDBACK)" ] || pgrep -x 'gamescope|gamescope-wl' >/dev/null 2>&1
 }
 
+# Game Mode settings changed for a stream are put back afterwards. The value from before is
+# saved per setting, tied to this boot: after a reboot (gamescope starts afresh) an old one
+# means nothing and must not be "restored". Saved in the runtime folder if there is one
+# (cleared on reboot), otherwise the home folder's cache.
+gs_state_file() {   # NAME
+  local dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then dir="$HOME/.cache"; mkdir -p "$dir" 2>/dev/null; fi
+  echo "$dir/steam-remote-$1"
+}
+gs_set() {   # PROPERTY VALUE
+  DISPLAY=:0 timeout 5 xprop -root -f "$1" 32c -set "$1" "$2"
+}
+gs_change() {   # PROPERTY VALUE NAME: remember the value from before (once per stream), then set it
+  local state cur prev saved_boot boot
+  state=$(gs_state_file "$3")
+  boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  read -r prev saved_boot 2>/dev/null <"$state" || { prev=""; saved_boot=""; }
+  [ "$saved_boot" = "$boot" ] || rm -f "$state"
+  cur=$(gs_prop "$1")
+  [ -e "$state" ] || { echo "${cur:-0} $boot" >"$state"; } 2>/dev/null
+  [ "${cur:-0}" = "$2" ] || gs_set "$1" "$2"
+}
+gs_restore() {   # PROPERTY NAME: put back what gs_change found, if it ran this boot
+  local state cur prev saved_boot boot
+  state=$(gs_state_file "$2")
+  boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+  read -r prev saved_boot 2>/dev/null <"$state" || return 0
+  rm -f "$state"
+  [ "$saved_boot" = "$boot" ] && [ -n "$prev" ] || return 0
+  cur=$(gs_prop "$1")
+  [ "${cur:-0}" = "$prev" ] || gs_set "$1" "$prev"
+}
+
 # Game Mode normally shows the game and Steam's menus on separate hardware layers and
 # lets the display hardware do part of the colour work. Sunshine captures only one
 # layer, so the stream can miss menus, go black, or get HDR colours wrong. Forcing
@@ -754,31 +789,36 @@ in_game_mode() {   # gamescope sets this property as soon as it starts
 # property is harmless in Desktop Mode, so "on" sets it whatever the mode. "off" only
 # acts if "on" ran, so it never turns off a Force Composite you set yourself.
 composite() {
-  local want=${1:-} state cur prev saved_boot boot
-  [[ "$want" =~ ^(on|off)$ ]] || die "Usage: $0 --composite on|off"
-  # Remember what was there before; the runtime folder if there is one (cleared on reboot,
-  # like gamescope's own state), otherwise the home folder's cache.
-  state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-  if [ ! -d "$state" ] || [ ! -w "$state" ]; then state="$HOME/.cache"; mkdir -p "$state" 2>/dev/null; fi
-  state="$state/steam-remote-composite"
+  [[ "${1:-}" =~ ^(on|off)$ ]] || die "Usage: $0 --composite on|off"
   command -v xprop >/dev/null 2>&1 || { warn "xprop is missing"; return 1; }
-  # The saved value is tied to this boot: after a reboot (gamescope starts afresh) an old
-  # one means nothing, and must not be "restored".
-  boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
-  read -r prev saved_boot 2>/dev/null <"$state" || { prev=""; saved_boot=""; }
-  [ "$saved_boot" = "$boot" ] || { rm -f "$state"; prev=""; }
-  if [ "$want" = on ]; then
-    cur=$(gs_prop GAMESCOPE_COMPOSITE_FORCE)
-    [ -e "$state" ] || { echo "${cur:-0} $boot" >"$state"; } 2>/dev/null
-    DISPLAY=:0 timeout 5 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 1
-  else
-    [ -n "$prev" ] || return 0   # "on" didn't run this boot: nothing of ours to undo
-    rm -f "$state"
-    [ "$prev" = 1 ] && return 0
-    cur=$(gs_prop GAMESCOPE_COMPOSITE_FORCE)
-    [ "${cur:-0}" = 0 ] && return 0
-    DISPLAY=:0 timeout 5 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 0
-  fi
+  if [ "$1" = on ]; then gs_change GAMESCOPE_COMPOSITE_FORCE 1 composite
+  else gs_restore GAMESCOPE_COMPOSITE_FORCE composite; fi
+}
+
+# Game Mode's HDR, matched to what this PC's Moonlight asks for, for the length of the
+# stream. Steam's own Enable HDR setting comes back when Sunshine stops. It only has an
+# effect if the stream output (the dummy plug) accepts HDR10.
+game_hdr() {
+  [[ "${1:-}" =~ ^(on|off)$ ]] || die "Usage: $0 --hdr on|off"
+  command -v xprop >/dev/null 2>&1 || { warn "xprop is missing"; return 1; }
+  in_game_mode || return 0   # Desktop Mode has its own HDR switch, in KDE's settings
+  local before; before=$(gs_prop GAMESCOPE_HDR_OUTPUT_FEEDBACK)
+  gs_change GAMESCOPE_DISPLAY_HDR_ENABLED "$([ "$1" = on ] && echo 1 || echo 0)" hdr || return 1
+  # Give Game Mode a moment to switch the output, so the stream check that follows is current.
+  local want=0 tries=6
+  [ "$1" = on ] && want=1
+  [ "${before:-0}" = "$want" ] && return 0
+  while [ "$tries" -gt 0 ] && [ "$(gs_prop GAMESCOPE_HDR_OUTPUT_FEEDBACK)" = "$before" ]; do
+    sleep 0.5; tries=$((tries - 1))
+  done
+  return 0
+}
+
+# Everything a stream changed in Game Mode, put back (run when Sunshine stops).
+stream_end() {
+  command -v xprop >/dev/null 2>&1 || return 0
+  gs_restore GAMESCOPE_DISPLAY_HDR_ENABLED hdr
+  gs_restore GAMESCOPE_COMPOSITE_FORCE composite
 }
 
 # What the display behind the stream offers, from its EDID: the biggest mode and
@@ -924,16 +964,18 @@ stream_info() {
   if [ -n "$gm" ]; then
     if [ "$hdr10" = 0 ] || [ "$hdr10" = 2 ]; then
       echo "HDR: not possible: the stream output doesn't offer HDR10. An HDR dummy plug is needed (docs/quality.md)"
-    elif [ "$hdr_out" = 1 ] && [ "$want" = sdr ]; then
-      echo "HDR: ready, but this PC is set to SDR (STREAM_HDR=\"no\")"
+    elif [ "$want" = sdr ]; then
+      echo "HDR: off for this stream (Moonlight's Enable HDR is off, or STREAM_HDR is no)"
     elif [ "$hdr_out" = 1 ] && [ "$want" = hdr ]; then
-      echo "HDR: ready, and this PC asks Moonlight for HDR"
+      echo "HDR: on, and Moonlight asks for it"
     elif [ "$hdr_out" = 1 ]; then
       echo "HDR: ready. Turn on Enable HDR in Moonlight to use it"
     elif [ "$hdr_on" = 1 ]; then
       echo "HDR: on in Steam, but Game Mode doesn't see HDR on this output (docs/quality.md)"
+    elif [ "$want" = hdr ]; then
+      echo "HDR: Moonlight asks for it, but Game Mode's HDR is off. Check MATCH_HDR is yes, or turn on Steam > Settings > Display > Enable HDR"
     else
-      echo "HDR: off. While streaming, turn on Steam > Settings > Display > Enable HDR (remembered for this plug)"
+      echo "HDR: off. Turn on Enable HDR in Moonlight (or Steam > Settings > Display > Enable HDR)"
     fi
   fi
 }
@@ -1288,6 +1330,8 @@ case "${1:---apply}" in
   --stream-info)     stream_info "${2:-}" ;;
   --stream-watch)    stream_watch "${2:-300}" "${3:-}" ;;
   --composite)       composite "${2:-}" ;;
+  --hdr)             game_hdr "${2:-}" ;;
+  --stream-end)      stream_end ;;
   --version)         echo "steam-remote-server $VERSION" ;;
   -h|--help)         sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//' ;;
   *)                 die "Unknown option '$1'. See: $0 --help" ;;

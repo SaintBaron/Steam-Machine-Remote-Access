@@ -239,7 +239,7 @@ Open Moonlight > **Settings** (gear icon):
 | Resolution / FPS | Your display's, e.g. 1440p 60 or 4K 60 | Match what you'll watch it on |
 | Video bitrate | 60 to 150 Mbps (wired), 30 to 60 (Wi-Fi) | Higher is sharper, if the network keeps up |
 | Video codec | HEVC (or AV1 on Macs that decode it) | Better quality per Mbps |
-| **Enable HDR** | On, if your display does HDR | Without it, HDR games look washed out. [The HDR checklist](quality.md#hdr) has the rest |
+| **Enable HDR** | On, if your display does HDR | The one HDR switch: Game Mode's HDR follows it for each stream. [The HDR checklist](quality.md#hdr) has the rest |
 
 For HDR, turn on **High Dynamic Range** for your display in **System Settings > Displays**, where the display supports it.
 
@@ -259,6 +259,7 @@ Then it shows the less common settings and asks whether to change them. Press En
 
 - **Moonlight app** (default `Desktop`, the whole screen): another Sunshine app if you've added one.
 - **Game Mode capture fix** (default `yes`): keeps the stream from going black in Game Mode, and keeps Steam's menus and HDR colours right. Leave it on.
+- **HDR follows Moonlight** (default `yes`): Moonlight's **Enable HDR** also turns Game Mode's HDR on or off for each stream; Steam's own setting comes back when you disconnect.
 - **Wake wait** (default 90 seconds): how long Connect waits for the Steam Machine to wake.
 - **Wake-on-LAN broadcast** (default automatic, the `.255` address): set it only if your home network is bigger than a `/24`.
 - **Name in Sunshine** (default this computer's name): how this Mac appears in Sunshine's paired-devices list.

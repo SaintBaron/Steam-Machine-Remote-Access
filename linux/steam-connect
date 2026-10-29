@@ -39,10 +39,10 @@ load_config
 LOCK="${XDG_RUNTIME_DIR:-$HOME/.cache}/steam-connect.lock"
 HANGUP_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/steam-remote/disconnect.log"
 SELF=$(real_path "$0")
-# Game Mode capture fix (see --composite in the server script). The xprop fallback is for
-# Steam Machines still on a server script older than 1.2.0.
+# Game Mode capture fix (see --composite in the server script); FIX_OFF also puts back the
+# HDR setting. The xprop fallback is for Steam Machines still on a server script older than 1.2.0.
 FIX_ON="$SR_SERVER --composite on 2>/dev/null || DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 1"
-FIX_OFF="{ $SR_SERVER --composite off 2>/dev/null || DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 0; }"
+FIX_OFF="{ $SR_SERVER --stream-end 2>/dev/null || DISPLAY=:0 xprop -root -f GAMESCOPE_COMPOSITE_FORCE 32c -set GAMESCOPE_COMPOSITE_FORCE 0; }"
 WATCH_PID=""
 
 # ---------------------------------------------------------------------------
@@ -218,8 +218,18 @@ if [ "$BLACK_SCREEN_FIX" = yes ]; then
   run "$FIX_ON" >/dev/null 2>&1 || warn "Couldn't apply the Game Mode capture fix (fine in Desktop Mode)."
 fi
 
+# 8b. Game Mode's HDR, matched to Moonlight's Enable HDR (or STREAM_HDR) for this stream.
+#     Steam's own setting comes back when Sunshine stops.
+HDR_WANT=""
+[ "$STREAM" = 1 ] && HDR_WANT=$(hdr_wanted)
+if [ "$MATCH_HDR" = yes ] && [ -n "$HDR_WANT" ]; then
+  if run "$SR_SERVER --hdr $([ "$HDR_WANT" = yes ] && echo on || echo off)" >/dev/null 2>&1; then
+    say "Game Mode HDR $([ "$HDR_WANT" = yes ] && echo on || echo off), to match Moonlight"
+  fi
+fi
+
 # 9. What the stream can do: resolution, HDR, encoder (needs a 1.2.0+ server script).
-if INFO=$(run "$SR_SERVER --stream-info $(case "$STREAM_HDR" in no) echo sdr ;; yes) echo hdr ;; esac)" 2>/dev/null) && [ -n "$INFO" ]; then
+if INFO=$(run "$SR_SERVER --stream-info $(case "$HDR_WANT" in no) echo sdr ;; yes) echo hdr ;; esac)" 2>/dev/null) && [ -n "$INFO" ]; then
   say "Stream check"
   while IFS= read -r l; do echo "    $l"; done <<<"$INFO"
 fi
@@ -230,7 +240,7 @@ if [ "$STREAM" = 1 ]; then
   while IFS= read -r a; do ARGS[n]=$a; n=$((n + 1)); done < <(moonlight_args)
   if [ "$n" -gt 0 ]; then say "Starting Moonlight ($MOONLIGHT_APP; ${ARGS[*]})"
   else say "Starting Moonlight ($MOONLIGHT_APP)"; fi
-  { run "$SR_SERVER --stream-watch 300 $([ "$STREAM_HDR" = no ] && echo sdr)" 2>/dev/null | while IFS= read -r l; do say "$l"; done; } 9>&- &
+  { run "$SR_SERVER --stream-watch 300 $([ "$HDR_WANT" = no ] && echo sdr)" 2>/dev/null | while IFS= read -r l; do say "$l"; done; } 9>&- &
   WATCH_PID=$!
   # Moonlight's own messages go to a log, so an older Moonlight that rejects an option
   # (it exits with "Unknown options") can be reported instead of silently not opening.

@@ -73,3 +73,7 @@ STREAM_BITRATE_AWAY="20"
 STREAM_CODEC=""
 # HDR: yes or no. Empty = Moonlight's own "Enable HDR" setting.
 STREAM_HDR=""
+# Turn Game Mode's HDR on or off for each stream to match Moonlight's "Enable HDR" (or
+# STREAM_HDR), so Moonlight's one switch does both. Steam's own HDR setting comes back
+# when you disconnect. "yes" or "no".
+MATCH_HDR="yes"

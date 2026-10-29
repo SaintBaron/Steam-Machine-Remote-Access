@@ -99,7 +99,7 @@ The worst case if someone abuses these, from an already-logged-in session: they 
 
 Sunshine captures the screen with KMS, which needs `CAP_SYS_ADMIN`. Running the Flatpak as root keeps that capability, and Flatpak's sandbox still applies. To keep it inside the sandbox, the service uses a **setuid copy of bubblewrap** (`/var/lib/sunshine-bwrap/bwrap`) in a folder only root can enter (`0700`). It's recreated from SteamOS's own `/usr/bin/bwrap` every time Sunshine starts, so it stays up to date. Other users can't run it.
 
-The Game Mode capture fix, the stream check and the SDR/HDR report don't need root: they read and set properties on Game Mode's display as your user. When Sunshine stops, its service undoes the capture fix by running the server script as your user (`runuser`), not as root.
+The Game Mode capture fix, the HDR matching, the stream check and the SDR/HDR report don't need root: they read and set properties on Game Mode's display as your user. When Sunshine stops, its service puts those settings back by running the server script as your user (`runuser`), not as root.
 
 ### The shared login (Linux)
 

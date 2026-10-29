@@ -41,6 +41,7 @@ STREAM_BITRATE=""          # Mbps, at home
 STREAM_BITRATE_AWAY="20"   # Mbps, through a VPN
 STREAM_CODEC=""            # auto, HEVC, AV1 or H.264
 STREAM_HDR=""              # yes or no
+MATCH_HDR="yes"            # turn Game Mode HDR on or off to match Moonlight's Enable HDR
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWarning:\033[0m %s\n' "$*" >&2; }
@@ -65,7 +66,7 @@ sr_parse_config() {
     key=${BASH_REMATCH[1]}; val=${BASH_REMATCH[3]}${BASH_REMATCH[4]}
     case "$key" in
       MACHINE_IP|REMOTE_MODE|REMOTE_MACHINE_IP|REMOTE_PC_IP|MACHINE_USER|HOST_ALIAS|MACHINE_MAC|BROADCAST|MOONLIGHT_APP|WEBUI_PORT|PERSIST|KEEPALIVE|WAKE_TIMEOUT|BLACK_SCREEN_FIX|CLIENT_NAME|\
-      STREAM_RESOLUTION|STREAM_FPS|STREAM_BITRATE|STREAM_BITRATE_AWAY|STREAM_CODEC|STREAM_HDR)
+      STREAM_RESOLUTION|STREAM_FPS|STREAM_BITRATE|STREAM_BITRATE_AWAY|STREAM_CODEC|STREAM_HDR|MATCH_HDR)
         printf -v "$key" '%s' "$val" ;;
       KEY_FILE) KEY_FILE=${val/#\~/$HOME} ;;
     esac
@@ -87,6 +88,7 @@ load_config() {
   [ -n "$BROADCAST" ] || BROADCAST="${MACHINE_IP%.*}.255"
   valid_ip "$BROADCAST" || die "BROADCAST in $SR_CONFIG isn't an IPv4 address"
   [ -n "$CLIENT_NAME" ] || CLIENT_NAME=$(uname -n 2>/dev/null || echo linux-pc)
+  [[ "$MATCH_HDR" =~ ^(yes|no)$ ]] || MATCH_HDR=yes
   if ! check_stream_settings; then
     warn "Using Moonlight's own stream settings instead. Fix it with: steam-remote-setup quality"
     STREAM_RESOLUTION=""; STREAM_FPS=""; STREAM_BITRATE=""; STREAM_BITRATE_AWAY=""; STREAM_CODEC=""; STREAM_HDR=""
@@ -113,6 +115,28 @@ check_stream_settings() {
     *) warn "STREAM_CODEC must be auto, HEVC, AV1 or H.264 (or empty)"; return 1 ;;
   esac
   [[ "$STREAM_HDR" =~ ^(yes|no|)$ ]] || { warn "STREAM_HDR must be yes, no or empty"; return 1; }
+}
+
+# Moonlight's own "Enable HDR" setting: yes or no, or nothing if it can't be read (Moonlight
+# never opened, or installed some other way). Moonlight keeps it as "hdr" in its settings.
+moonlight_hdr_pref() {
+  local f v
+  if [ "$SR_OS" = Darwin ]; then
+    defaults read com.moonlight-stream.Moonlight >/dev/null 2>&1 || return 0
+    v=$(defaults read com.moonlight-stream.Moonlight hdr 2>/dev/null)
+  else
+    case "$(moonlight_cmd)" in
+      flatpak*) f="$HOME/.var/app/$SR_MOONLIGHT_FLATPAK/config/Moonlight Game Streaming Project/Moonlight.conf" ;;
+      *)        f="${XDG_CONFIG_HOME:-$HOME/.config}/Moonlight Game Streaming Project/Moonlight.conf" ;;
+    esac
+    [ -f "$f" ] || return 0
+    v=$(sed -n 's/^hdr=//p' "$f" | head -n 1)
+  fi
+  case "$v" in true|1) echo yes ;; *) echo no ;; esac   # not saved yet: Moonlight's default is off
+}
+# What this stream asks for: STREAM_HDR if set, otherwise Moonlight's own setting.
+hdr_wanted() {
+  if [ -n "$STREAM_HDR" ]; then echo "$STREAM_HDR"; else moonlight_hdr_pref; fi
 }
 
 # Moonlight's options for this stream, one per line (Moonlight's bitrate is in Kbps).

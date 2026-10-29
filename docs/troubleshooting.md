@@ -123,7 +123,7 @@ Last resort: `sudo /home/.steam-remote/steam-remote-server.sh --uninstall --keep
 | Log: `bwrap: Can't find source path /run/user/1000/pulse/native` | Audio not reachable, usually nobody logged in on the Steam Machine yet | Let it reach Game Mode or Desktop Mode, then `steam-connect restart` |
 | Log: `Failed to gain CAP_SYS_ADMIN` / `Flatpak do not support KMS capture` | The sandbox copy isn't in use | Re-apply: `steam-ssh sudo /home/.steam-remote/steam-remote-server.sh`. Check `FLATPAK_BWRAP` is in `systemctl cat steam-remote-sunshine.service` |
 | Log: `Unable to find display or encoder` | No active output when Sunshine started | See [Displays](#displays) |
-| Washed-out colours, or a stall when Game Mode switches HDR | HDR is on in Game Mode but off in Moonlight | Turn on **Enable HDR** in Moonlight, and HDR for your monitor. More in [quality.md](quality.md#colours-look-wrong) |
+| Washed-out colours, or a stall when Game Mode switches HDR | HDR is on in Game Mode but off in Moonlight | Keep `MATCH_HDR="yes"` (the default) so they match, or turn on **Enable HDR** in Moonlight, and HDR for your monitor. More in [quality.md](quality.md#colours-look-wrong) |
 | `streaming in SDR` when you wanted HDR | One link in the HDR chain is missing | The message says which side; follow [the HDR checklist](quality.md#hdr) |
 | Soft or blurry picture | The Steam Machine's resolution on the dummy plug doesn't match Moonlight's, or the bitrate is low | [quality.md](quality.md#quick-checklist) |
 | Stream check: `Encoder: software` | Sunshine couldn't use the graphics card's encoder | `steam-connect restart`. If it stays, update Sunshine (guide, *Updating*) and read its log: `steam-ssh journalctl -u steam-remote-sunshine.service -b --no-pager -o cat` |

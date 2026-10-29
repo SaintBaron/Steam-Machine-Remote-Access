@@ -55,7 +55,7 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `steam-remote-guard.service` | yes | Loads the firewall |
 | `steam-remote-display.service` | yes | Starts on the TV: turns the stream output off before the display manager starts |
 | `steam-remote-idle.timer` / `.service` | yes (unless `IDLE_MINUTES=0`) | Every 5 minutes: if Sunshine runs and no stream traffic arrived for `IDLE_MINUTES`, stops it and switches back to the TV |
-| `steam-remote-sunshine.service` | **no** (on demand) | Sunshine itself, as root with KMS capture. Started and stopped by the client scripts. When it stops, it undoes the Game Mode capture fix (`--composite off`, run as your user) |
+| `steam-remote-sunshine.service` | **no** (on demand) | Sunshine itself, as root with KMS capture. Started and stopped by the client scripts. When it stops, it puts back what the stream changed in Game Mode (`--stream-end`, run as your user) |
 
 ### `steam-remote-server.sh`
 
@@ -75,6 +75,8 @@ Everything this project needs lives in **`/home/.steam-remote`** (owned by root)
 | `--auth-mode` | no | Print the login mode: `key+password` or `key` |
 | `--stream-info` | no | The stream check: what the stream output offers, Game Mode's HDR state, the encoder, and whether HDR can work |
 | `--stream-watch [SECONDS]` | no | Wait (default 300 seconds) for a stream to start, then say whether it's SDR or HDR |
+| `--hdr on\|off` | no | Set Game Mode's HDR for this stream (what `MATCH_HDR` uses). Does nothing in Desktop Mode |
+| `--stream-end` | no | Put back what a stream changed in Game Mode: HDR and the capture fix. Sunshine's service runs it when it stops |
 | `--composite on\|off` | no | Turn the Game Mode capture fix on, or put back what was there before. Does nothing in Desktop Mode |
 | `--uninstall [--keep-sunshine] [--keep-ssh]` | yes | Remove everything; by default also uninstalls Sunshine and turns SSH off |
 | `--boot-display` | yes | Switch to the TV now (what the boot service runs) |
@@ -159,6 +161,7 @@ Values are parsed and validated, never run as code. After editing, apply with `s
 | `STREAM_BITRATE_AWAY` | `20` | Bitrate in Mbps when connected through the VPN. Empty = same as at home |
 | `STREAM_CODEC` | empty | `auto`, `HEVC`, `AV1` or `H.264` |
 | `STREAM_HDR` | empty | `yes` or `no`. Empty = Moonlight's own **Enable HDR** |
+| `MATCH_HDR` | `yes` | Turn Game Mode's HDR on or off for each stream to match Moonlight's **Enable HDR** (or `STREAM_HDR`). Steam's own setting comes back when you disconnect |
 
 A fully commented example is in [config.example](../config.example).
 

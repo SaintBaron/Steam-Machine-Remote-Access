@@ -90,9 +90,12 @@ STREAM_FPS="$STREAM_FPS"
 # Bitrate in Mbps at home, and away from home (through the VPN, where upload is slower).
 STREAM_BITRATE="$STREAM_BITRATE"
 STREAM_BITRATE_AWAY="$STREAM_BITRATE_AWAY"
-# Video codec: auto, HEVC, AV1 or H.264. HDR: yes or no.
+# Video codec: auto, HEVC, AV1 or H.264. HDR: yes or no (empty = Moonlight's Enable HDR).
 STREAM_CODEC="$STREAM_CODEC"
 STREAM_HDR="$STREAM_HDR"
+# Turn Game Mode's HDR on or off for each stream to match Moonlight's Enable HDR (or
+# STREAM_HDR), so that one switch does both. Steam's own setting comes back afterwards.
+MATCH_HDR="$MATCH_HDR"
 EOF
   install -m 600 "$tmp" "$SR_CONFIG"; rm -f "$tmp"
 }
@@ -125,7 +128,7 @@ other_settings_offer() {
   [ -n "$app" ] || app=Desktop
   [ -n "$bc" ] || bc=automatic
   [ -n "$name" ] || name="this computer's name"
-  echo "   Other settings: Moonlight app '$app', Game Mode capture fix $BLACK_SCREEN_FIX,"
+  echo "   Other settings: Moonlight app '$app', Game Mode capture fix $BLACK_SCREEN_FIX, HDR follows Moonlight $MATCH_HDR,"
   echo "   wake wait ${WAKE_TIMEOUT}s, wake broadcast $bc, name in Sunshine: $name."
   yes_no "   Change these" n || return 0
   local v
@@ -142,6 +145,13 @@ other_settings_offer() {
     [[ "$v" =~ ^(yes|no)$ ]] && break
   done
   BLACK_SCREEN_FIX=$v
+  echo "   With HDR following Moonlight, Moonlight's Enable HDR switch also turns Game Mode's HDR"
+  echo "   on or off for each stream. Steam's own setting comes back when you disconnect."
+  while :; do
+    v=$(ask "   HDR follows Moonlight: yes or no" "$MATCH_HDR")
+    [[ "$v" =~ ^(yes|no)$ ]] && break
+  done
+  MATCH_HDR=$v
   while :; do
     v=$(ask "   Seconds to wait for it to wake from sleep" "$WAKE_TIMEOUT")
     [[ "$v" =~ ^[0-9]{2,3}$ ]] && break

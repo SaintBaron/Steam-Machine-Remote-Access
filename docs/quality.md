@@ -75,7 +75,7 @@ The preset needs Sunshine 2026.906 or later; older versions ignore it. To update
 | Line | What it tells you |
 | --- | --- |
 | `Stream output ...` | The biggest mode the dummy plug offers, and whether it accepts HDR: `HDR10` (good), `no HDR`, or `HDR, but not the BT.2020 colours Game Mode needs` (Game Mode won't use HDR on it) |
-| `Game Mode: HDR on/off` | Steam's **Enable HDR** setting for the dummy plug |
+| `Game Mode: HDR on/off` | Game Mode's HDR for this stream: matched to Moonlight (`MATCH_HDR`), or Steam's **Enable HDR** setting |
 | `capture fix on/off` | Whether Game Mode is drawing everything onto one layer for Sunshine (see [HDR](#hdr), step 3) |
 | `Desktop Mode: ...` | The Steam Machine is in Desktop Mode, where HDR follows KDE's own display setting |
 | `Encoder: ...` | The graphics card's encoder Sunshine is using (`vaapi` or `vulkan`) and the preset. `software` means the graphics encoder failed: expect a soft, laggy picture, and check Sunshine's log |
@@ -89,11 +89,13 @@ You can run it yourself at any time, while Sunshine is running:
 
 ## HDR
 
+**Turning HDR on and off:** use Moonlight's **Enable HDR** setting (or `STREAM_HDR`). When you connect, `steam-connect` turns Game Mode's HDR on or off to match, for that stream only, and Steam's own setting comes back when you disconnect. So the one switch in Moonlight does both ends. This is `MATCH_HDR="yes"` in this PC's config, the default; set it to `no` to leave Game Mode's HDR to Steam's setting. The connection shows `Game Mode HDR on, to match Moonlight` (or `off`). Changing Moonlight's setting takes effect from the next connection.
+
 HDR only works if every link in the chain does HDR. Go through these in order.
 
 **1. A dummy plug that offers HDR.** The Steam Machine only turns on HDR for a display that says it supports it, and a dummy plug is a display as far as it knows. The stream check's first line must end in `HDR10`. Game Mode needs the plug to list both HDR10 (PQ) and BT.2020 colours. If it says `no HDR`, or `not the BT.2020 colours Game Mode needs`, you need a different plug: look for one sold as HDR or for game streaming, that offers 4K at 60 Hz or more. See [displays.md](displays.md#hdr-and-4k).
 
-**2. HDR on in Game Mode, for the dummy plug.** While streaming, open **Steam > Settings > Display** on the stream and turn on **Enable HDR**. Steam remembers this for the dummy plug. The TV keeps its own setting. The stream check then shows `Game Mode: HDR on`.
+**2. HDR on in Game Mode, for the dummy plug.** With `MATCH_HDR="yes"` (the default) this happens by itself when Moonlight's **Enable HDR** is on. Otherwise, while streaming, open **Steam > Settings > Display** on the stream and turn on **Enable HDR**; Steam remembers this for the dummy plug, and the TV keeps its own setting. The stream check then shows `Game Mode: HDR on`.
 
 **3. The capture fix on.** In Game Mode, Steam's menus and the game can be on separate hardware layers, and part of the HDR colour conversion is done by the display hardware as the picture goes out. Sunshine only captures one layer, before that conversion, so without the fix HDR colours come out wrong (washed out or too dark), menus can be missing, or the stream can be black. While you're connected, `steam-connect` makes Game Mode draw everything onto one layer first, then undoes it when Sunshine stops. It costs a little graphics power, so it's only on while you stream. This is `BLACK_SCREEN_FIX="yes"` in this PC's config, the default. The stream check shows `capture fix on`.
 
@@ -133,7 +135,7 @@ Desktop Mode (KDE Plasma on the Steam Machine) has its own HDR switch. While str
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Washed out, greyish | Game Mode is in HDR, but Moonlight asked for SDR | Step 4, or turn off HDR in Game Mode |
+| Washed out, greyish | Game Mode is in HDR, but Moonlight asked for SDR | Turn on `MATCH_HDR` (this PC's config) so the two always agree, or step 4 |
 | Washed out or far too dark, though the stream says HDR | The capture fix isn't on | Check `capture fix on` in the stream check, and `BLACK_SCREEN_FIX="yes"` in this PC's config |
 | Too bright or oversaturated on the PC | This PC's screen is in SDR, or HDR is off on it | Step 5 |
 
